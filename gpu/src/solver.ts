@@ -58,9 +58,9 @@ function createArrays<A, K>(backend: Backend<A, K>, problem: Problem): Arrays<A>
   return {
     rowPtr: backend.array("row_ptr", problem.rowPtr, "read"),
     colIdx: backend.array("col_idx", problem.colIdx, "read"),
-    vals: backend.array("vals", problem.vals, "read"),
+    vals: backend.array("vals", problem.vals, "read-write"),
     diagIdx: backend.array("diag_idx", problem.diagIdx, "read"),
-    rhs: backend.array("rhs", problem.rhs, "read"),
+    rhs: backend.array("rhs", problem.rhs, "read-write"),
     dinv: backend.array("dinv", new Float32Array(9 * rows), "read-write"),
     x: vector("x"), r: vector("r"), z: vector("z"), p: vector("p"), q: vector("q"),
     partials: backend.array("partials", new Float32Array(2 * workgroupsFor(rows)), "read-write"),

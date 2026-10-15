@@ -25,7 +25,7 @@ export interface Problem {
   readonly rhs: Float32Array<ArrayBuffer>;
 }
 
-function field<T>(source: object, key: string, check: (value: unknown) => value is T): T {
+export function field<T>(source: object, key: string, check: (value: unknown) => value is T): T {
   const value: unknown = Reflect.get(source, key);
   if (!check(value)) {
     throw new Error(`problem.json: field '${key}' is missing or has the wrong type`);
@@ -33,12 +33,12 @@ function field<T>(source: object, key: string, check: (value: unknown) => value 
   return value;
 }
 
-const isNumber = (value: unknown): value is number => typeof value === "number";
-const isString = (value: unknown): value is string => typeof value === "string";
-const isObject = (value: unknown): value is object => typeof value === "object" && value !== null;
-const isArray = (value: unknown): value is readonly unknown[] => Array.isArray(value);
+export const isNumber = (value: unknown): value is number => typeof value === "number";
+export const isString = (value: unknown): value is string => typeof value === "string";
+export const isObject = (value: unknown): value is object => typeof value === "object" && value !== null;
+export const isArray = (value: unknown): value is readonly unknown[] => Array.isArray(value);
 
-function parseEntry(value: unknown): ArrayEntry {
+export function parseEntry(value: unknown): ArrayEntry {
   if (!isObject(value)) {
     throw new Error("problem.json: array entry is not an object");
   }
@@ -67,7 +67,7 @@ export function parseManifest(text: string): ProblemManifest {
   };
 }
 
-function slice(manifest: ProblemManifest, bytes: ArrayBuffer, name: string, dtype: string): ArrayBuffer {
+export function slice(manifest: { readonly arrays: readonly ArrayEntry[] }, bytes: ArrayBuffer, name: string, dtype: string): ArrayBuffer {
   const entry = manifest.arrays.find((candidate) => candidate.name === name);
   if (entry === undefined || entry.dtype !== dtype) {
     throw new Error(`problem.bin: array '${name}' (${dtype}) not found`);

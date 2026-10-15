@@ -51,9 +51,34 @@ impl MembraneElement {
         self.grad_n.map(|g| scale(add(scale(pw, g[0]), scale(pc, g[1])), self.area))
     }
 
+    /// PSD-projected Hessian (negative stress clamped): the E1 linear-system matrices.
     pub fn hessian(&self, x: &[Vec3], material: &Material) -> ElementHessian {
+        self.hessian_with_stress(x, material, clamp_negative_stress(material.stress(self.strain(x))))
+    }
+
+    /// Exact tangent ∂²W/∂x², the matrix Newton needs for quadratic convergence.
+    pub fn tangent(&self, x: &[Vec3], material: &Material) -> ElementHessian {
+        self.hessian_with_stress(x, material, material.stress(self.strain(x)))
+    }
+
+    /// W(x + αd) − W(x), exact for St. Venant–Kirchhoff (W is quadratic in E) and free of the
+    /// cancellation in subtracting two large energies: S(E):ΔE + W(ΔE).
+    pub fn energy_change(&self, x: &[Vec3], d: &[Vec3], alpha: f64, material: &Material) -> f64 {
         let (fw, fc) = self.columns(x);
-        let stress = clamp_negative_stress(material.stress(self.strain(x)));
+        let (dw, dc) = self.columns(d);
+        let (dw, dc) = (scale(dw, alpha), scale(dc, alpha));
+        let change = [
+            dot(fw, dw) + 0.5 * dot(dw, dw),
+            dot(fc, dc) + 0.5 * dot(dc, dc),
+            0.5 * (dot(fw, dc) + dot(dw, fc) + dot(dw, dc)),
+        ];
+        let [sww, scc, swc] = material.stress(self.strain(x));
+        let first = sww * change[0] + scc * change[1] + 2.0 * swc * change[2];
+        self.area * (first + material.energy_density(change))
+    }
+
+    fn hessian_with_stress(&self, x: &[Vec3], material: &Material, stress: [f64; 3]) -> ElementHessian {
+        let (fw, fc) = self.columns(x);
         let strain_rows = self.grad_n.map(|g| strain_vectors(g, fw, fc));
         let mut hessian = [[[[0.0; 3]; 3]; 3]; 3];
         for k in 0..3 {
@@ -165,6 +190,37 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn exact_tangent_matches_gradient_finite_difference_in_compression() {
+        let (element, rest) = sample_element();
+        let material = Material::knit_baseline();
+        let x = crate::testing::stretched(&rest, 0.93, 1.05, &mut Lcg::new(11), 1e-5);
+        let tangent = element.tangent(&x, &material);
+        for l in 0..3 {
+            for d in 0..3 {
+                let fd = crate::testing::gradient_derivative(&x, l, d, 1e-8, |y| element.gradient(y, &material));
+                for k in 0..3 {
+                    for r in 0..3 {
+                        let exact = tangent[k][l][r][d];
+                        assert!((fd[k][r] - exact).abs() <= 1e-5 * (1.0 + exact.abs()), "k{k} l{l} r{r} d{d}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn energy_change_equals_energy_difference() {
+        let (element, rest) = sample_element();
+        let material = Material::knit_baseline();
+        let x = random_positions(&rest, &mut Lcg::new(5), 1.1, 0.0005);
+        let d = random_positions(&rest, &mut Lcg::new(6), 0.0, 0.0003);
+        let moved: Vec<Vec3> = x.iter().zip(&d).map(|(p, q)| add(*p, scale(*q, 0.7))).collect();
+        let direct = element.energy(&moved, &material) - element.energy(&x, &material);
+        let change = element.energy_change(&x, &d, 0.7, &material);
+        assert!((direct - change).abs() <= 1e-12 * direct.abs().max(element.energy(&x, &material)), "{direct} vs {change}");
     }
 
     #[test]
