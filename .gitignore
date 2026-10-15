@@ -1,3 +1,4 @@
 oracle/target/
 gpu/node_modules/
 cases/*/*.bin
+cases-baseline/*/*.bin

@@ -1,4 +1,4 @@
-import type { ArrayAccess, Backend, Dispatch, HostArray, KernelSpec } from "./backend.ts";
+import { REQUIRED_STORAGE_BUFFERS, type ArrayAccess, type Backend, type Dispatch, type HostArray, type KernelSpec } from "./backend.ts";
 
 const USAGE = { MAP_READ: 0x1, COPY_SRC: 0x4, COPY_DST: 0x8, STORAGE: 0x80, QUERY_RESOLVE: 0x200 } as const;
 const MAP_MODE_READ = 0x1;
@@ -122,8 +122,15 @@ function createArray(device: GPUDevice, label: string, data: HostArray, access: 
   return buffer;
 }
 
+/** backend and driver exist only with --enable-webgpu-developer-features. */
+const developerField = (info: GPUAdapterInfo, key: string): string => {
+  const value: unknown = Reflect.get(info, key);
+  return typeof value === "string" ? value : "";
+};
+
 const describeAdapter = (info: GPUAdapterInfo): string =>
-  [info.vendor, info.architecture, info.device, info.description].filter((part) => part.length > 0).join(" / ") || "unknown adapter";
+  [info.vendor, info.architecture, info.device, info.description, developerField(info, "backend"), developerField(info, "driver")]
+    .filter((part) => part.length > 0).join(" / ") || "unknown adapter";
 
 function backendFor(context: Context, adapter: string): Backend<GPUBuffer, WebGpuKernel> {
   const { device } = context;
@@ -147,7 +154,10 @@ export async function createWebGpuBackend(gpu: GPU): Promise<Backend<GPUBuffer, 
     throw new Error("navigator.gpu.requestAdapter() returned null: no WebGPU adapter");
   }
   const timestamps = adapter.features.has("timestamp-query");
-  const device = await adapter.requestDevice({ requiredFeatures: timestamps ? ["timestamp-query"] : [] });
+  const device = await adapter.requestDevice({
+    requiredFeatures: timestamps ? ["timestamp-query"] : [],
+    requiredLimits: { maxStorageBuffersPerShaderStage: REQUIRED_STORAGE_BUFFERS },
+  });
   const context: Context = { device, errors: watchErrors(device), timer: timestamps ? createTimer(device) : null };
   return backendFor(context, describeAdapter(adapter.info));
 }

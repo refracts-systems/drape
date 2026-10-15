@@ -38,6 +38,10 @@ pub struct PcgSettings {
     pub tolerance: f64,
     pub max_iterations: usize,
     pub history_stride: usize,
+    /// Residual replacement r = b − Ax every this many iterations (0 = never), as residual.wgsl in REPLACE mode.
+    pub replace_every: usize,
+    /// Replacement only while the recursive relative residual is above this (keeps the f32 rounding floor from resetting r forever).
+    pub replace_above: f64,
 }
 
 pub struct PcgReport {
@@ -67,9 +71,17 @@ pub fn solve<T: Real>(matrix: &Bsr, rhs: &[f64], settings: &PcgSettings) -> PcgR
         if !converged {
             state.update_direction(beta);
         }
+        if !converged && replaces(settings, report.iterations, &state) {
+            state.replace_residual(&system);
+        }
     }
     report.finish(converged, state.relative(), &state.x, start.elapsed().as_secs_f64());
     report
+}
+
+fn replaces<T: Real>(settings: &PcgSettings, iterations: usize, state: &State<T>) -> bool {
+    let due = settings.replace_every > 0 && iterations % settings.replace_every == 0;
+    due && state.rr > T::of(settings.replace_above * settings.replace_above) * state.rr0
 }
 
 impl PcgReport {
@@ -197,6 +209,19 @@ impl<T: Real> State<T> {
         }
     }
 
+    /// r = b − Ax, z = D⁻¹r and fresh rᵀz, rᵀr; p is kept (van der Vorst–Ye residual replacement).
+    fn replace_residual(&mut self, system: &System<T>) {
+        self.r = (0..system.rows())
+            .flat_map(|row| {
+                let ax = system.multiply_row(row, &self.x);
+                [0, 1, 2].map(|d| system.rhs[3 * row + d] - ax[d])
+            })
+            .collect();
+        self.z = (0..system.rows()).flat_map(|row| system.precondition_row(row, &self.r)).collect();
+        self.rz = reduce_rows(system.rows(), |row| row_dot(&self.r, &self.z, row));
+        self.rr = reduce_rows(system.rows(), |row| row_dot(&self.r, &self.r, row));
+    }
+
     fn relative(&self) -> f64 {
         (self.rr.wide() / self.rr0.wide()).sqrt()
     }
@@ -266,11 +291,22 @@ mod tests {
     fn f64_pcg_matches_cholesky_on_tension_case() {
         let problem = build(CaseKind::Tension, 13);
         let exact = BandCholesky::factor(&problem.matrix).unwrap().solve(&problem.rhs);
-        let settings = PcgSettings { tolerance: 1e-12, max_iterations: 5000, history_stride: 10 };
+        let settings = PcgSettings { tolerance: 1e-12, max_iterations: 5000, history_stride: 10, replace_every: 0, replace_above: 0.0 };
         let report = solve::<f64>(&problem.matrix, &problem.rhs, &settings);
         assert!(report.converged);
         let error = difference_norm(&report.solution, &exact) / vector_norm(&exact);
         assert!(error < 1e-9, "{error}");
+    }
+
+    #[test]
+    fn residual_replacement_keeps_f32_pcg_on_the_true_residual() {
+        let problem = build(CaseKind::Tension, 33);
+        let settings = |replace_every| PcgSettings { tolerance: 1e-7, max_iterations: 5000, history_stride: 10, replace_every, replace_above: 1e-2 };
+        let true_residual = |report: &PcgReport| difference_norm(&problem.matrix.multiply(&report.solution), &problem.rhs) / vector_norm(&problem.rhs);
+        let plain = solve::<f32>(&problem.matrix, &problem.rhs, &settings(0));
+        let replaced = solve::<f32>(&problem.matrix, &problem.rhs, &settings(10));
+        assert!(replaced.converged);
+        assert!(true_residual(&replaced) < true_residual(&plain), "{} vs {}", true_residual(&replaced), true_residual(&plain));
     }
 
     #[test]

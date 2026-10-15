@@ -13,6 +13,8 @@ pub struct GenerateOptions {
     pub columns: usize,
     pub tolerance: f64,
     pub max_iterations: usize,
+    pub replace_every: usize,
+    pub replace_above: f64,
 }
 
 pub fn run(options: &GenerateOptions, dir: &Path) -> Result<(), String> {
@@ -75,6 +77,8 @@ fn problem_json(problem: &Problem, options: &GenerateOptions, manifest: &str) ->
         .number("stretch_wale", wale)
         .number("stretch_course", course)
         .number("time_step_s", if problem.kind == CaseKind::Dynamic { TIME_STEP } else { 0.0 })
+        .integer("replace_every", options.replace_every)
+        .number("replace_above", options.replace_above)
         .raw("material", material.render())
         .raw("arrays", manifest.to_string())
         .render()
@@ -97,9 +101,9 @@ impl Reference {
         let cholesky_seconds = start.elapsed().as_secs_f64();
         let rounded_rhs: Vec<f64> = problem.rhs.iter().map(|&v| v as f32 as f64).collect();
         let exact_of_rounded_system = BandCholesky::factor(&problem.matrix.rounded_to_f32())?.solve(&rounded_rhs);
-        let settings = PcgSettings { tolerance: options.tolerance, max_iterations: options.max_iterations, history_stride: 16 };
-        let pcg64 = solve::<f64>(&problem.matrix, &problem.rhs, &settings);
-        let pcg32 = solve::<f32>(&problem.matrix, &problem.rhs, &settings);
+        let plain = PcgSettings { tolerance: options.tolerance, max_iterations: options.max_iterations, history_stride: 16, replace_every: 0, replace_above: 0.0 };
+        let pcg64 = solve::<f64>(&problem.matrix, &problem.rhs, &plain);
+        let pcg32 = solve::<f32>(&problem.matrix, &problem.rhs, &PcgSettings { replace_every: options.replace_every, replace_above: options.replace_above, ..plain });
         Ok(Reference { exact, exact_of_rounded_system, cholesky_seconds, bandwidth: factor.bandwidth(), pcg64, pcg32 })
     }
 

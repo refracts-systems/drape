@@ -8,6 +8,7 @@ import type { BrowserOutcome } from "../browser-main.ts";
 import type { ExperimentSettings } from "../experiment.ts";
 import { parseCommon } from "./cli.ts";
 import { KERNEL_DIR, printSummary, SOURCE_DIR, writeOutputs } from "./files.ts";
+import { assertTargetAdapter } from "./hardware.ts";
 
 const ADAPTERS = ["hardware", "software"] as const;
 const PAGE = `<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><script type="module" src="/src/browser-main.ts"></script>`;
@@ -16,18 +17,13 @@ const SAFE_NAME = /^[\w-]+\.(ts|wgsl|json|bin)$/;
 const BASE_FLAGS = ["--enable-unsafe-webgpu", "--enable-webgpu-developer-features"];
 const LINUX_VULKAN = ["--enable-features=Vulkan", "--use-angle=vulkan", "--disable-vulkan-surface"];
 const SWIFTSHADER = ["--use-vulkan=swiftshader", "--use-webgpu-adapter=swiftshader", "--no-sandbox"];
-const SOFTWARE_ADAPTER = /swiftshader|llvmpipe|lavapipe|software|microsoft basic/i;
+/** Playwright's Chromium ships D3DCompiler_47 (FXC) but not dxil.dll/dxcompiler.dll, so D3D12 device creation fails with DXC. */
+const WINDOWS_FXC = ["--disable-dawn-features=use_dxc"];
 
 function chromiumFlags(adapter: (typeof ADAPTERS)[number]): string[] {
   const vulkan = process.platform === "linux" || adapter === "software" ? LINUX_VULKAN : [];
-  return [...BASE_FLAGS, ...vulkan, ...(adapter === "software" ? SWIFTSHADER : [])];
-}
-
-/** Timings from a CPU rasterizer must never be read as GPU results. */
-function checkAdapter(requested: (typeof ADAPTERS)[number], adapter: string): void {
-  if (requested === "hardware" && SOFTWARE_ADAPTER.test(adapter)) {
-    throw new Error(`asked for a hardware adapter but Chromium gave '${adapter}'; rerun with --adapter software to accept it`);
-  }
+  const shaderCompiler = process.platform === "win32" && adapter === "hardware" ? WINDOWS_FXC : [];
+  return [...BASE_FLAGS, ...vulkan, ...shaderCompiler, ...(adapter === "software" ? SWIFTSHADER : [])];
 }
 
 async function resolveFile(url: string, caseDir: string): Promise<{ readonly body: string | Buffer; readonly type: string }> {
@@ -78,7 +74,7 @@ async function main(): Promise<void> {
   const browser = await chromium.launch({ channel: "chromium", headless: true, args: chromiumFlags(options.adapter), executablePath: process.env.E1_CHROMIUM, timeout: 60_000 });
   try {
     const outcome = await solveInPage(browser, portOf(server), options.settings);
-    checkAdapter(options.adapter, outcome.report.adapter);
+    assertTargetAdapter(options.adapter, outcome.report.adapter);
     await writeOutputs(options.caseDir, outcome.report, Float32Array.from(outcome.solution));
     printSummary(outcome.report);
   } finally {

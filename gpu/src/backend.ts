@@ -1,3 +1,6 @@
+/** residual.wgsl in REPLACE mode binds 10 storage buffers; the WebGPU default per-stage limit is 8. */
+export const REQUIRED_STORAGE_BUFFERS = 10;
+
 export type ArrayAccess = "read" | "read-write";
 export type HostArray = Float32Array<ArrayBuffer> | Uint32Array<ArrayBuffer>;
 

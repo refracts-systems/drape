@@ -1,0 +1,33 @@
+{
+  "schema": "e1-gpu/1",
+  "case": "tension",
+  "grid_columns": 257,
+  "backend": "vgpu-node-dawn",
+  "adapter": "D3D12 driver version 32.0.16.1714 (gpu)",
+  "rows": 65025,
+  "unknowns": 195075,
+  "blocks": 711201,
+  "tolerance": 1e-7,
+  "max_iterations": 20000,
+  "chunk_iterations": 32,
+  "replace_every": 50,
+  "replace_above": 0.01,
+  "status": "converged",
+  "iterations": 1545,
+  "recursive_relative_residual": 9.756091307548612e-8,
+  "gpu_f32_true_relative_residual": 0.007820781734257234,
+  "repeats": 3,
+  "deterministic_repeat": true,
+  "timing": {
+    "prepare_ms": 194.78820000000007,
+    "first_solve_ms": 1380.8277000000003,
+    "warm_solve_ms": 1359.8041000000003,
+    "warm_ms_per_iteration": 0.8801321035598707,
+    "gpu_ms": null,
+    "gpu_ms_source": "unavailable",
+    "readback_ms": 0.8548999999998159,
+    "total_ms": 1576.4708
+  },
+  "host_os": "Windows 11 Home Single Language 10.0.26300",
+  "host_gpus": "AMD Radeon(TM) Graphics 31.0.21925.1001; NVIDIA GeForce RTX 3050 Laptop GPU 32.0.16.1714"
+}

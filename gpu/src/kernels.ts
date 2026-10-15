@@ -5,7 +5,7 @@ export const KERNEL_FILES = {
   reduce: { file: "reduce.wgsl", usesState: true },
   update_dot: { file: "update_dot.wgsl", usesState: true },
   direction: { file: "direction.wgsl", usesState: true },
-  residual: { file: "residual.wgsl", usesState: false },
+  residual: { file: "residual.wgsl", usesState: true },
 } as const;
 
 export type KernelName = keyof typeof KERNEL_FILES;

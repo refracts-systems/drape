@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage:
-  oracle generate --case <tension|slack|dynamic> --n <grid columns> --out <dir> [--tol 1e-7] [--max-iter 20000]
+  oracle generate --case <tension|slack|dynamic> --n <grid columns> --out <dir> [--tol 1e-7] [--max-iter 20000] [--replace-every 0] [--replace-above 0]
   oracle compare --dir <case dir>
   oracle summarize --dir <cases dir> --out <summary.json>";
 
@@ -55,6 +55,8 @@ fn generate_options(flags: &HashMap<String, String>) -> Result<generate::Generat
         columns: number(flags, "n", "33")?,
         tolerance: number(flags, "tol", "1e-7")?,
         max_iterations: number(flags, "max-iter", "20000")?,
+        replace_every: number(flags, "replace-every", "0")?,
+        replace_above: number(flags, "replace-above", "0")?,
     })
 }
 

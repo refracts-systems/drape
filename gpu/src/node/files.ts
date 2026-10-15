@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { GpuReport } from "../experiment.ts";
 import { assembleKernels, type KernelSources } from "../kernels.ts";
 import { parseManifest, parseProblem, type Problem } from "../problem.ts";
+import { hostInfo } from "./hardware.ts";
 
 export const KERNEL_DIR = fileURLToPath(new URL("../../kernels/", import.meta.url));
 export const SOURCE_DIR = fileURLToPath(new URL("../", import.meta.url));
@@ -20,7 +21,7 @@ export const loadKernels = (): Promise<KernelSources> =>
 /** gpu-x.bin (little-endian f32, consumed by `oracle compare`) and gpu-result.json. */
 export async function writeOutputs(caseDir: string, report: GpuReport, solution: Float32Array<ArrayBuffer>): Promise<void> {
   await writeFile(join(caseDir, "gpu-x.bin"), new Uint8Array(solution.buffer, solution.byteOffset, solution.byteLength));
-  await writeFile(join(caseDir, "gpu-result.json"), `${JSON.stringify(report, null, 2)}\n`);
+  await writeFile(join(caseDir, "gpu-result.json"), `${JSON.stringify({ ...report, ...hostInfo() }, null, 2)}\n`);
 }
 
 export function printSummary(report: GpuReport): void {

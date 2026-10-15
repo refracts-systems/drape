@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn spectrum_estimate_is_positive_and_ordered() {
         let problem = build(CaseKind::Tension, 11);
-        let settings = PcgSettings { tolerance: 1e-12, max_iterations: 2000, history_stride: 100 };
+        let settings = PcgSettings { tolerance: 1e-12, max_iterations: 2000, history_stride: 100, replace_every: 0, replace_above: 0.0 };
         let report = solve::<f64>(&problem.matrix, &problem.rhs, &settings);
         let spectrum = estimate(&report.alphas, &report.betas).unwrap();
         assert!(spectrum.smallest > 0.0 && spectrum.largest > spectrum.smallest);

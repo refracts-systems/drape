@@ -1,5 +1,6 @@
 // One workgroup: strided sum of per-workgroup partials, a fixed tree, then the CG scalar update.
-// MODE 0 = INIT (rᵀz, rᵀr), 1 = ALPHA (pᵀq), 2 = BETA (rᵀz, rᵀr, convergence), 3 = TRUE (‖b − Ax‖²).
+// MODE 0 = INIT (rᵀz, rᵀr), 1 = ALPHA (pᵀq), 2 = BETA (rᵀz, rᵀr, convergence), 3 = TRUE (‖b − Ax‖²),
+// 4 = REPLACE (rᵀz, rᵀr of the replaced residual).
 override MODE: u32 = 0u;
 
 @group(0) @binding(0) var<storage, read_write> partials: array<f32>;
@@ -13,6 +14,9 @@ var<workgroup> stop: u32;
 fn cs_main(@builtin(local_invocation_id) lid: vec3u) {
   if (lid.x == 0u) {
     stop = select(state.status, 0u, MODE == 0u || MODE == 3u);
+    if (MODE == 4u && state.rr <= state.replace_above2 * state.rr0) {
+      stop = 1u;
+    }
   }
   if (workgroupUniformLoad(&stop) != 0u) {
     return;
@@ -44,6 +48,7 @@ fn finish(sum_a: f32, sum_b: f32) {
     case 0u: { start(sum_a, sum_b); }
     case 1u: { step_length(sum_a); }
     case 2u: { advance(sum_a, sum_b); }
+    case 4u: { replace(sum_a, sum_b); }
     default: { state.true_rr = sum_a; }
   }
 }
@@ -66,6 +71,11 @@ fn step_length(pq: f32) {
   state.pq = pq;
   state.alpha = alpha;
   state.status = select(3u, 0u, pq > 0.0 && is_finite(alpha));
+}
+
+fn replace(rz: f32, rr: f32) {
+  state.rz = rz;
+  state.rr = rr;
 }
 
 fn advance(rz: f32, rr: f32) {

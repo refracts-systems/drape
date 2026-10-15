@@ -24,6 +24,10 @@ export interface PreparedSolver<A, K> {
   readonly setup: readonly Dispatch<K>[];
   readonly iteration: readonly Dispatch<K>[];
   readonly finish: readonly Dispatch<K>[];
+  /** Residual replacement after every `replaceEvery` iterations (0 = never), as in the oracle's f32 emulation. */
+  readonly replacement: readonly Dispatch<K>[];
+  readonly replaceEvery: number;
+  readonly replaceAbove: number;
 }
 
 export interface SolveRun {
@@ -64,11 +68,16 @@ function createArrays<A, K>(backend: Backend<A, K>, problem: Problem): Arrays<A>
   };
 }
 
-type Stage = "invert" | "init" | "start" | "spmv" | "alpha" | "update" | "beta" | "direction" | "residual" | "measure";
+type Stage = "invert" | "init" | "start" | "spmv" | "alpha" | "update" | "beta" | "direction" | "residual" | "measure" | "replace" | "replaced";
 
 function reduceSpec<A>(sources: KernelSources, arrays: Arrays<A>, mode: number): KernelSpec<A> {
   const label = `reduce_mode_${mode}`;
   return { label, source: sources.reduce, constants: { MODE: mode }, bindings: { partials: arrays.partials, state: arrays.state } };
+}
+
+function residualSpec<A>(sources: KernelSources, a: Arrays<A>, replace: boolean): KernelSpec<A> {
+  const bindings = { row_ptr: a.rowPtr, col_idx: a.colIdx, vals: a.vals, rhs: a.rhs, x: a.x, partials: a.partials, dinv: a.dinv, r: a.r, z: a.z, state: a.state };
+  return { label: replace ? "residual_replace" : "residual", source: sources.residual, constants: { REPLACE: replace ? 1 : 0 }, bindings };
 }
 
 function stageSpecs<A>(sources: KernelSources, a: Arrays<A>): Record<Stage, KernelSpec<A>> {
@@ -83,8 +92,10 @@ function stageSpecs<A>(sources: KernelSources, a: Arrays<A>): Record<Stage, Kern
     update: spec("update_dot", { p: a.p, q: a.q, dinv: a.dinv, state: a.state, x: a.x, r: a.r, z: a.z, partials: a.partials }),
     beta: reduceSpec(sources, a, 2),
     direction: spec("direction", { z: a.z, state: a.state, p: a.p }),
-    residual: spec("residual", { row_ptr: a.rowPtr, col_idx: a.colIdx, vals: a.vals, rhs: a.rhs, x: a.x, partials: a.partials }),
+    residual: residualSpec(sources, a, false),
     measure: reduceSpec(sources, a, 3),
+    replace: residualSpec(sources, a, true),
+    replaced: reduceSpec(sources, a, 4),
   };
 }
 
@@ -106,12 +117,17 @@ export async function prepareSolver<A, K>(backend: Backend<A, K>, problem: Probl
     setup: [at(k.invert, rows), at(k.init, rows), at(k.start, 1)],
     iteration: [at(k.spmv, rows), at(k.alpha, 1), at(k.update, rows), at(k.beta, 1), at(k.direction, rows)],
     finish: [at(k.residual, rows), at(k.measure, 1)],
+    replacement: [at(k.replace, rows), at(k.replaced, 1)],
+    replaceEvery: problem.manifest.replace_every,
+    replaceAbove: problem.manifest.replace_above,
   };
 }
 
-function initialState(settings: SolveSettings): Uint32Array<ArrayBuffer> {
+function initialState(settings: SolveSettings, replaceAbove: number): Uint32Array<ArrayBuffer> {
   const words = new Uint32Array(16);
-  new Float32Array(words.buffer)[6] = settings.tolerance * settings.tolerance;
+  const floats = new Float32Array(words.buffer);
+  floats[6] = settings.tolerance * settings.tolerance;
+  floats[11] = replaceAbove * replaceAbove;
   words[10] = settings.maxIterations;
   return words;
 }
@@ -125,9 +141,16 @@ function decodeState(bytes: ArrayBuffer): StateSnapshot {
 const sumTimings = (values: readonly (number | null)[]): number | null =>
   values.some((value) => value === null) ? null : values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
 
+/** With replacement on, a chunk is exactly one replacement period, so replacements land after iterations K, 2K, … */
+function chunkDispatches<A, K>(solver: PreparedSolver<A, K>, settings: SolveSettings): { readonly chunk: readonly Dispatch<K>[]; readonly iterations: number } {
+  const iterations = solver.replaceEvery > 0 ? solver.replaceEvery : settings.chunkIterations;
+  const tail = solver.replaceEvery > 0 ? solver.replacement : [];
+  return { chunk: [...Array.from({ length: iterations }, () => solver.iteration).flat(), ...tail], iterations };
+}
+
 async function iterate<A, K>(solver: PreparedSolver<A, K>, settings: SolveSettings, timings: (number | null)[]): Promise<number> {
-  const chunk = Array.from({ length: settings.chunkIterations }, () => solver.iteration).flat();
-  const chunkLimit = Math.ceil(settings.maxIterations / settings.chunkIterations) + 1;
+  const { chunk, iterations } = chunkDispatches(solver, settings);
+  const chunkLimit = Math.ceil(settings.maxIterations / iterations) + 1;
   for (let chunks = 1; chunks <= chunkLimit; chunks += 1) {
     timings.push(await solver.backend.run(chunk));
     const state = decodeState(await solver.backend.read(solver.arrays.state));
@@ -157,7 +180,7 @@ export async function solveOnce<A, K>(solver: PreparedSolver<A, K>, settings: So
   const { backend, arrays } = solver;
   const started = performance.now();
   const timings: (number | null)[] = [];
-  backend.write(arrays.state, initialState(settings));
+  backend.write(arrays.state, initialState(settings, solver.replaceAbove));
   timings.push(await backend.run(solver.setup));
   const chunks = await iterate(solver, settings, timings);
   timings.push(await backend.run(solver.finish));

@@ -1,6 +1,6 @@
 import { prepareShader } from "@vgpu/wgsl/prepare";
 import { compute, frame, init, storage, type Compute, type Gpu, type StorageBuffer } from "vgpu/node";
-import type { ArrayAccess, Backend, Dispatch, HostArray } from "../backend.ts";
+import { REQUIRED_STORAGE_BUFFERS, type ArrayAccess, type Backend, type Dispatch, type HostArray } from "../backend.ts";
 
 export type VgpuAdapter = "auto" | "hardware" | "software";
 
@@ -21,7 +21,7 @@ async function runFrame(gpu: Gpu, dispatches: readonly Dispatch<Compute>[]): Pro
 
 /** vgpu/node (Dawn): same WGSL, same dispatch list as the raw-WebGPU path. No GPU timer yet, so gpu_ms is null. */
 export async function createVgpuBackend(adapter: VgpuAdapter): Promise<Backend<StorageBuffer, Compute>> {
-  const gpu = await init({ adapter });
+  const gpu = await init({ adapter, requiredLimits: { maxStorageBuffersPerShaderStage: REQUIRED_STORAGE_BUFFERS } });
   return {
     name: "vgpu-node-dawn",
     adapter: `${gpu.adapter.name} (${gpu.adapter.type})`,

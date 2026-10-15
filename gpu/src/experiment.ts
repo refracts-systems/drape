@@ -30,6 +30,8 @@ export interface GpuReport {
   readonly tolerance: number;
   readonly max_iterations: number;
   readonly chunk_iterations: number;
+  readonly replace_every: number;
+  readonly replace_above: number;
   readonly status: SolveStatus;
   readonly iterations: number;
   readonly recursive_relative_residual: number;
@@ -78,6 +80,8 @@ function report<A, K>(backend: Backend<A, K>, problem: Problem, settings: Experi
     schema: "e1-gpu/1", case: manifest.case, grid_columns: manifest.grid_columns, backend: backend.name, adapter: backend.adapter,
     rows: manifest.rows, unknowns: manifest.unknowns, blocks: manifest.blocks,
     tolerance: settings.tolerance, max_iterations: settings.maxIterations, chunk_iterations: settings.chunkIterations,
+    replace_every: manifest.replace_every,
+    replace_above: manifest.replace_above,
     status: first.status, iterations: first.iterations,
     recursive_relative_residual: first.recursiveRelativeResidual,
     gpu_f32_true_relative_residual: first.gpuTrueRelativeResidual,

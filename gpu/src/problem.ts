@@ -11,6 +11,8 @@ export interface ProblemManifest {
   readonly rows: number;
   readonly unknowns: number;
   readonly blocks: number;
+  readonly replace_every: number;
+  readonly replace_above: number;
   readonly arrays: readonly ArrayEntry[];
 }
 
@@ -59,6 +61,8 @@ export function parseManifest(text: string): ProblemManifest {
     rows: field(value, "rows", isNumber),
     unknowns: field(value, "unknowns", isNumber),
     blocks: field(value, "blocks", isNumber),
+    replace_every: Reflect.has(value, "replace_every") ? field(value, "replace_every", isNumber) : 0,
+    replace_above: Reflect.has(value, "replace_above") ? field(value, "replace_above", isNumber) : 0,
     arrays: field(value, "arrays", isArray).map(parseEntry),
   };
 }
