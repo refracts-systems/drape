@@ -1,0 +1,17 @@
+{
+  "name": "e1-gpu-pcg",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "typecheck:no-vgpu": "tsc -p tsconfig.no-vgpu.json",
+    "e1:webgpu": "node src/node/run-browser.ts",
+    "e1:vgpu": "node src/node/run-vgpu.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "playwright": "1.56.1",
+    "typescript": "^6.0.2"
+  }
+}

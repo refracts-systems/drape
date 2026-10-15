@@ -1,0 +1,10 @@
+[package]
+name = "oracle"
+version = "0.1.0"
+edition = "2021"
+description = "f64 reference oracle for Experiment 1: shell-membrane SPD systems, band Cholesky, f64/f32 PCG"
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
