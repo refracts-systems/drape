@@ -14,6 +14,9 @@ mod e3_checks;
 mod e3_compare;
 mod e3_generate;
 mod e3_summarize;
+mod e4_compare;
+mod e4_rules;
+mod e4_summarize;
 mod generate;
 mod hinge;
 mod io;
@@ -44,7 +47,10 @@ const USAGE: &str = "usage:
   oracle e2-summarize --dir <coupons dir> --out <summary.json>
   oracle e3-generate --n <grid columns> --out <dir> [--reference true|false]
   oracle e3-compare --dir <drape dir>
-  oracle e3-summarize --dir <drapes dir> --out <summary.json>";
+  oracle e3-summarize --dir <drapes dir> --out <summary.json>
+  oracle e4-generate --n <grid columns> --out <dir> [--reference true|false]
+  oracle e4-compare --dir <drape dir> --rung <A|B|C|D>
+  oracle e4-summarize --dir <drapes dir> --out <summary.json>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -70,6 +76,9 @@ fn dispatch(args: &[String]) -> Result<(), String> {
         "e3-generate" => e3_generate::run(number(&flags, "n", "33")?, number(&flags, "reference", "true")?, &PathBuf::from(required(&flags, "out")?)),
         "e3-compare" => e3_compare::run(&PathBuf::from(required(&flags, "dir")?)),
         "e3-summarize" => e3_summarize::run(&PathBuf::from(required(&flags, "dir")?), &PathBuf::from(required(&flags, "out")?)),
+        "e4-generate" => e3_generate::generate(number(&flags, "n", "33")?, number(&flags, "reference", "true")?, &PathBuf::from(required(&flags, "out")?), &e3_generate::E4_SCHEME),
+        "e4-compare" => e4_compare::run(&PathBuf::from(required(&flags, "dir")?), required(&flags, "rung")?),
+        "e4-summarize" => e4_summarize::run(&PathBuf::from(required(&flags, "dir")?), &PathBuf::from(required(&flags, "out")?)),
         other => Err(format!("unknown command '{other}'")),
     }
 }

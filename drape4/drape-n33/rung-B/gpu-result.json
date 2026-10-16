@@ -1,0 +1,44 @@
+{
+  "schema": "e4-gpu/1",
+  "backend": "vgpu-node-dawn",
+  "adapter": "D3D12 driver version 32.0.16.1714 (gpu)",
+  "rung": "B",
+  "settings": {
+    "projected": true,
+    "settings": {
+      "floorStop": true,
+      "forcing": false,
+      "regularize": false
+    }
+  },
+  "record_fields": [
+    "step",
+    "iteration",
+    "relativeResidual",
+    "pcgIterations",
+    "pcgStatus",
+    "linearResidual",
+    "stepLength",
+    "halvings",
+    "status"
+  ],
+  "robust_fields": [
+    "eta",
+    "mu",
+    "updateInf",
+    "stepInf",
+    "retries"
+  ],
+  "steps": 240,
+  "trajectory_ms": 53164.50399999999,
+  "ms_per_step": 221.51876666666664,
+  "phase_ms_per_step": {
+    "assembly": 13.249843333332917,
+    "pcg": 184.47913000000108,
+    "line_search": 2.18222333333282,
+    "io": 16.061189166663908,
+    "other": 5.546380833335907
+  },
+  "host_os": "Windows 11 Home Single Language 10.0.26300",
+  "host_gpus": "AMD Radeon(TM) Graphics 31.0.21925.1001; NVIDIA GeForce RTX 3050 Laptop GPU 32.0.16.1714"
+}

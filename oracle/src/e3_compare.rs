@@ -215,13 +215,13 @@ struct Run {
     derivatives: DrapeDerivativeCheck,
 }
 
-fn load_run(dir: &Path) -> Result<Run, String> {
-    let problem = fs::read_to_string(dir.join("problem.json")).map_err(|e| format!("problem.json: {e}"))?;
+fn load_run(problem_dir: &Path, gpu_dir: &Path) -> Result<Run, String> {
+    let problem = fs::read_to_string(problem_dir.join("problem.json")).map_err(|e| format!("problem.json: {e}"))?;
     let drape = Drape::build(number(&problem, "", "grid_columns") as usize, TANGENT);
-    let gpu = fs::read_to_string(dir.join("gpu-result.json")).map_err(|e| format!("gpu-result.json: {e}"))?;
-    let trajectory = to_states(&read_f32_file(&dir.join("gpu-trajectory.bin"))?, drape.mesh.rest.len());
-    let records = step_records(&read_records(&dir.join("gpu-iterations.bin"))?, trajectory.len() - 1);
-    let kernels = kernel_errors(&drape, dir)?;
+    let gpu = fs::read_to_string(gpu_dir.join("gpu-result.json")).map_err(|e| format!("gpu-result.json: {e}"))?;
+    let trajectory = to_states(&read_f32_file(&gpu_dir.join("gpu-trajectory.bin"))?, drape.mesh.rest.len());
+    let records = step_records(&read_records(&gpu_dir.join("gpu-iterations.bin"))?, trajectory.len() - 1);
+    let kernels = kernel_errors(&drape, gpu_dir)?;
     let derivatives = drape_derivative_check(drape.mesh.columns);
     Ok(Run { drape, gpu, trajectory, records, kernels, derivatives })
 }
@@ -286,12 +286,12 @@ fn trajectory_json(run: &Run, f32_energy: f64) -> Json {
         .raw("f32_final_residuals", render_list(&r.final_residual))
 }
 
-fn result_json(run: &Run, dir: &Path) -> Result<String, String> {
+fn result_json(run: &Run, problem_dir: &Path, gpu_dir: &Path) -> Result<String, String> {
     let velocities = velocities_of(&run.trajectory, TIME_STEP);
     let f32_energy = energy_history(&run.drape, &run.trajectory, &velocities).worst_increase;
-    let problem = fs::read_to_string(dir.join("problem.json")).map_err(|e| e.to_string())?;
-    let reference = if flag(&problem, "", "reference") { Some(Reference::load(dir, run.drape.mesh.rest.len())?) } else { None };
-    let probes = match &reference { Some(r) => probes(&run.drape, r, dir)?, None => Vec::new() };
+    let problem = fs::read_to_string(problem_dir.join("problem.json")).map_err(|e| e.to_string())?;
+    let reference = if flag(&problem, "", "reference") { Some(Reference::load(problem_dir, run.drape.mesh.rest.len())?) } else { None };
+    let probes = match &reference { Some(r) => probes(&run.drape, r, gpu_dir)?, None => Vec::new() };
     let k = run.kernels;
     let json = Json::new()
         .text("schema", "e3-result/1")
@@ -312,10 +312,32 @@ fn result_json(run: &Run, dir: &Path) -> Result<String, String> {
 
 /// Scores a GPU drape run against the f64 oracle and writes result.json (schema e3-result/1).
 pub fn run(dir: &Path) -> Result<(), String> {
-    let run = load_run(dir)?;
-    let json = result_json(&run, dir)?;
+    let json = score(dir, dir)?;
     write_text(&dir.join("result.json"), &json)?;
     println!("{json}");
     Ok(())
 }
 
+
+/// The e3-result/1 JSON for a GPU run whose outputs live in `gpu_dir` and whose problem and reference live in `problem_dir`.
+pub fn score(problem_dir: &Path, gpu_dir: &Path) -> Result<String, String> {
+    let run = load_run(problem_dir, gpu_dir)?;
+    result_json(&run, problem_dir, gpu_dir)
+}
+
+/// What Experiment 4 needs from each probe: its step, one-step error, f32 floor and representation floor.
+pub struct ProbeSummary {
+    pub step: usize,
+    pub error: f64,
+    pub f32_floor: f64,
+    pub representation_floor: f64,
+}
+
+pub fn probe_summaries(problem_dir: &Path, gpu_dir: &Path) -> Result<Vec<ProbeSummary>, String> {
+    let problem = fs::read_to_string(problem_dir.join("problem.json")).map_err(|e| e.to_string())?;
+    let drape = Drape::build(number(&problem, "", "grid_columns") as usize, TANGENT);
+    let reference = Reference::load(problem_dir, drape.mesh.rest.len())?;
+    Ok(probes(&drape, &reference, gpu_dir)?.into_iter()
+        .map(|p| ProbeSummary { step: p.step, error: p.error, f32_floor: p.f32_floor(), representation_floor: p.representation_floor })
+        .collect())
+}

@@ -5,8 +5,8 @@ import { solveOnce, type PreparedSolver, type SolveRun, type SolveSettings } fro
 
 const CHUNK_ITERATIONS = 32;
 const IDENTITY = [1, 0, 0, 1] as const;
-export const STEP_STATUS = { running: 0, converged: 1, iteration_limit: 2, line_search_failed: 3 } as const;
-type StepStatus = (typeof STEP_STATUS)[keyof typeof STEP_STATUS];
+export const STEP_STATUS = { running: 0, converged: 1, iteration_limit: 2, line_search_failed: 3, update_rule: 4, regularization_cap: 5 } as const;
+export type StepStatus = (typeof STEP_STATUS)[keyof typeof STEP_STATUS];
 
 /** One Newton iterate: f32 residual ‖g‖/scale, the PCG solve and line search taken from it (NaN on the last iterate). */
 export interface IterationRecord {
@@ -55,13 +55,13 @@ export interface NewtonContext<A, K> {
   readonly iterates: Float32Array<ArrayBuffer>[] | null;
 }
 
-interface LineSearch {
+export interface LineSearch {
   readonly stepLength: number;
   readonly halvings: number;
 }
 
 export const norm32 = (values: Float32Array): number => Math.fround(Math.sqrt(values.reduce((sum, v) => Math.fround(sum + Math.fround(v * v)), 0)));
-const dot32 = (a: Float32Array, b: Float32Array): number => a.reduce((sum, v, i) => Math.fround(sum + Math.fround(v * b[i])), 0);
+export const dot32 = (a: Float32Array, b: Float32Array): number => a.reduce((sum, v, i) => Math.fround(sum + Math.fround(v * b[i])), 0);
 
 /** Assembles tangent and −g at `positions` into the solver's vals/rhs; returns −g. */
 export async function assemble<A, K>(gpu: NewtonGpu<A, K>, positions: Float32Array<ArrayBuffer>): Promise<Float32Array<ArrayBuffer>> {
@@ -70,7 +70,7 @@ export async function assemble<A, K>(gpu: NewtonGpu<A, K>, positions: Float32Arr
   return new Float32Array(await gpu.backend.read(gpu.solver.arrays.rhs));
 }
 
-async function energyChange<A, K>(gpu: NewtonGpu<A, K>, stepLength: number): Promise<number> {
+export async function energyChange<A, K>(gpu: NewtonGpu<A, K>, stepLength: number): Promise<number> {
   gpu.backend.write(gpu.step, Float32Array.of(stepLength));
   await gpu.backend.run(gpu.energyChange);
   const deltas = new Float32Array(await gpu.backend.read(gpu.elemDelta));
@@ -78,7 +78,7 @@ async function energyChange<A, K>(gpu: NewtonGpu<A, K>, stepLength: number): Pro
 }
 
 /** Backtracking from α = 1 until ΔΠ ≤ c·α·gᵀd; null when d is not a descent direction or halving runs out. */
-async function lineSearch<A, K>(context: NewtonContext<A, K>, slope: number): Promise<LineSearch | null> {
+export async function lineSearch<A, K>(context: NewtonContext<A, K>, slope: number): Promise<LineSearch | null> {
   const { armijo, max_halvings } = context.model.newton;
   if (!(slope < 0)) return null;
   for (let halvings = 0; halvings <= max_halvings; halvings += 1) {
@@ -88,13 +88,13 @@ async function lineSearch<A, K>(context: NewtonContext<A, K>, slope: number): Pr
   return null;
 }
 
-function scatter(model: NewtonModel, rows: Float32Array): Float32Array<ArrayBuffer> {
+export function scatter(model: NewtonModel, rows: Float32Array): Float32Array<ArrayBuffer> {
   const vertices = new Float32Array(3 * model.vertices);
   model.rowVertex.forEach((vertex, row) => vertices.set(rows.subarray(3 * row, 3 * row + 3), 3 * vertex));
   return vertices;
 }
 
-function advance(model: NewtonModel, positions: Float32Array, direction: Float32Array, stepLength: number): void {
+export function advance(model: NewtonModel, positions: Float32Array, direction: Float32Array, stepLength: number): void {
   model.rowVertex.forEach((vertex, row) => {
     [0, 1, 2].forEach((d) => { positions[3 * vertex + d] += stepLength * direction[3 * row + d]; });
   });
@@ -105,15 +105,15 @@ function pcgSettings(model: NewtonModel): SolveSettings {
   return { tolerance, maxIterations: max_iterations, chunkIterations: CHUNK_ITERATIONS };
 }
 
-function record<A, K>(context: NewtonContext<A, K>, entry: IterationRecord, positions: Float32Array<ArrayBuffer>): void {
+export function record<A, K>(context: NewtonContext<A, K>, entry: IterationRecord, positions: Float32Array<ArrayBuffer>): void {
   context.records.push(entry);
   context.iterates?.push(Float32Array.from(positions));
 }
 
-const terminal = (step: number, iteration: number, relativeResidual: number, status: StepStatus): IterationRecord =>
+export const terminal = (step: number, iteration: number, relativeResidual: number, status: StepStatus): IterationRecord =>
   ({ step, iteration, relativeResidual, pcgIterations: Number.NaN, pcgStatus: Number.NaN, linearResidual: Number.NaN, stepLength: Number.NaN, halvings: Number.NaN, status });
 
-const linearStatus = (run: SolveRun): number => ["running", "converged", "iteration_limit", "breakdown"].indexOf(run.status);
+export const linearStatus = (run: SolveRun): number => ["running", "converged", "iteration_limit", "breakdown"].indexOf(run.status);
 
 /** One Newton update from `positions`: E1 PCG on the assembled system, then the Armijo line search. */
 async function update<A, K>(context: NewtonContext<A, K>, positions: Float32Array<ArrayBuffer>, rhs: Float32Array, where: { readonly step: number; readonly iteration: number; readonly relative: number }): Promise<boolean> {

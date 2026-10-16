@@ -4,3 +4,5 @@ cases/*/*.bin
 cases-baseline/*/*.bin
 coupon/*/*.bin
 drape/*/*.bin
+drape4/*/*.bin
+drape4/*/*/*.bin

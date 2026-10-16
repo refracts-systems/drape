@@ -23,23 +23,42 @@ pub const PROBE_STEPS: [usize; 5] = [1, 10, 60, 120, 240];
 /// Evidence-triggered: the exact tangent lost positive definiteness at step 87 of the n33 drape.
 pub const TANGENT: TangentKind = TangentKind::Projected;
 
+/// How a drape experiment builds its reference: tangent kind, plain or regularised Newton, and the note recorded with it.
+pub struct Scheme {
+    pub name: &'static str,
+    pub tangent: TangentKind,
+    pub regularized: bool,
+    pub note: &'static str,
+}
+
+pub const E3_SCHEME: Scheme = Scheme { name: "e3", tangent: TANGENT, regularized: false,
+    note: "band Cholesky: exact tangent not positive definite at step 87 of drape-n33 (pivot -1.21e-1)" };
+
+/// Experiment 4: exact tangent with adaptive mass regularisation K + μ·M/h² (Levenberg–Marquardt).
+pub const E4_SCHEME: Scheme = Scheme { name: "e4", tangent: TangentKind::Exact, regularized: true,
+    note: "exact tangent + adaptive K + mu*M/h^2 (mu 0 per step, x10 from 1e-3 on non-PD or non-descent, /10 after a full step, cap 1e3)" };
+
 pub fn reference_settings() -> NewtonSettings {
     NewtonSettings { tolerance: REFERENCE_TOLERANCE, max_iterations: MAX_NEWTON_ITERATIONS, armijo: ARMIJO, max_halvings: MAX_HALVINGS }
 }
 
 pub fn run(columns: usize, with_reference: bool, dir: &Path) -> Result<(), String> {
+    generate(columns, with_reference, dir, &E3_SCHEME)
+}
+
+pub fn generate(columns: usize, with_reference: bool, dir: &Path, scheme: &Scheme) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let drape = Drape::build(columns, TANGENT);
-    let trajectory = if with_reference { Some(simulate(&drape, STEPS, &reference_settings())?) } else { None };
+    let drape = Drape::build(columns, scheme.tangent);
+    let trajectory = if with_reference { Some(simulate(&drape, STEPS, &reference_settings(), scheme.regularized)?) } else { None };
     let problem = problem_arrays(&drape, trajectory.as_ref());
     problem.write(&dir.join("problem.bin"))?;
-    write_text(&dir.join("problem.json"), &problem_json(&drape, with_reference, &problem.manifest()))?;
+    write_text(&dir.join("problem.json"), &problem_json(&drape, with_reference, scheme, &problem.manifest()))?;
     if let Some(t) = &trajectory {
         let mut reference = BinaryArrays::new();
         reference.push_f64("positions", &t.positions.iter().flatten().flatten().copied().collect::<Vec<f64>>());
         push_step_records(&mut reference, t);
         reference.write(&dir.join("reference.bin"))?;
-        write_text(&dir.join("reference.json"), &reference_json(&drape, t, &reference.manifest()))?;
+        write_text(&dir.join("reference.json"), &reference_json(&drape, t, scheme, &reference.manifest()))?;
         println!("{}", summary(&drape, t));
     }
     Ok(())
@@ -147,9 +166,12 @@ fn push_step_records(arrays: &mut BinaryArrays, t: &Trajectory) {
     let offsets: Vec<f64> = std::iter::once(0.0).chain(t.steps.iter().scan(0.0, |sum, s| { *sum += s.solution.residuals.len() as f64; Some(*sum) })).collect();
     arrays.push_f64("residual_offsets", &offsets);
     arrays.push_f64("residuals", &t.steps.iter().flat_map(|s| s.solution.residuals.clone()).collect::<Vec<f64>>());
+    arrays.push_f64("max_mu", &per_step(&|s| s.solution.regularization.max_mu));
+    arrays.push_f64("regularization_retries", &per_step(&|s| s.solution.regularization.retries as f64));
+    arrays.push_f64("mu_cap_hit", &per_step(&|s| f64::from(u8::from(s.solution.regularization.cap_hit))));
 }
 
-fn problem_json(drape: &Drape, with_reference: bool, manifest: &str) -> String {
+fn problem_json(drape: &Drape, with_reference: bool, scheme: &Scheme, manifest: &str) -> String {
     let m = &drape.material;
     let material = Json::new().number("wale_N_per_m", m.wale).number("course_N_per_m", m.course)
         .number("coupling_N_per_m", m.coupling).number("shear_N_per_m", m.shear);
@@ -158,7 +180,7 @@ fn problem_json(drape: &Drape, with_reference: bool, manifest: &str) -> String {
     let pcg = Json::new().number("tolerance", PCG_TOLERANCE).integer("max_iterations", PCG_MAX_ITERATIONS)
         .integer("replace_every", REPLACE_EVERY).number("replace_above", REPLACE_ABOVE);
     Json::new()
-        .text("schema", "e3-problem/1")
+        .text("schema", &format!("{}-problem/1", scheme.name))
         .text("case", &format!("drape-n{}", drape.mesh.columns))
         .integer("grid_columns", drape.mesh.columns)
         .integer("vertices", drape.mesh.rest.len())
@@ -170,12 +192,14 @@ fn problem_json(drape: &Drape, with_reference: bool, manifest: &str) -> String {
         .integer("steps", STEPS)
         .number("time_step_s", TIME_STEP)
         .number("gravity_m_per_s2", GRAVITY)
-        .text("tangent", TANGENT.name())
+        .text("tangent", scheme.tangent.name())
+        .flag("regularized", scheme.regularized)
         .flag("reference", with_reference)
         .integer("probes", if with_reference { PROBE_STEPS.len() } else { 0 })
         .raw("material", material.render())
         .raw("newton", newton.render())
         .raw("pcg", pcg.render())
+        .raw("robust", crate::e4_rules::settings_json().render())
         .raw("arrays", manifest.to_string())
         .render()
 }
@@ -196,14 +220,15 @@ fn step_json(n: usize, t: &Trajectory, energy: f64) -> String {
         .render()
 }
 
-fn reference_json(drape: &Drape, t: &Trajectory, manifest: &str) -> String {
+fn reference_json(drape: &Drape, t: &Trajectory, scheme: &Scheme, manifest: &str) -> String {
     let energy = energy_history(drape, &t.positions, &t.velocities);
     let steps: Vec<String> = (0..t.steps.len()).map(|n| step_json(n, t, energy.energies[n + 1])).collect();
     Json::new()
-        .text("schema", "e3-reference/1")
+        .text("schema", &format!("{}-reference/1", scheme.name))
         .text("solver", "f64 Newton on the backward-Euler incremental potential, exact band-Cholesky step, Armijo")
-        .text("tangent", TANGENT.name())
-        .text("trigger", "band Cholesky: exact tangent not positive definite at step 87 of drape-n33 (pivot -1.21e-1)")
+        .text("tangent", scheme.tangent.name())
+        .flag("regularized", scheme.regularized)
+        .text("note", scheme.note)
         .number("reference_tolerance", REFERENCE_TOLERANCE)
         .raw("derivative_check", drape_derivative_check(drape.mesh.columns).json().render())
         .number("energy_scale_J", energy.scale)

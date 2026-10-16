@@ -10,8 +10,10 @@ const WORKGROUP = 256;
 /** The E2 membrane and assembly kernels plus hinge and inertia kernels, all writing one shared set of local arrays. */
 export interface DrapeGpu<A, K> extends NewtonGpu<A, K> {
   readonly xHat: A;
+  readonly regularization: A;
   readonly elemGrad: A;
   readonly elemHess: A;
+  readonly inertia: readonly Dispatch<K>[];
   readonly exactElements: readonly Dispatch<K>[];
   readonly projectedElements: readonly Dispatch<K>[];
 }
@@ -21,7 +23,7 @@ interface DrapeArrays<A> {
   readonly elemVertices: A; readonly elemGeom: A; readonly hingeVertices: A; readonly hingeStiffness: A;
   readonly rowVertex: A; readonly rowMass: A; readonly dofMask: A;
   readonly blockPtr: A; readonly blockIdx: A; readonly forcePtr: A; readonly forceIdx: A;
-  readonly elemGrad: A; readonly elemHess: A; readonly elemDelta: A;
+  readonly elemGrad: A; readonly elemHess: A; readonly elemDelta: A; readonly regularization: A;
 }
 
 /** Offsets (in floats) of the hinge and inertia sections behind the membrane entries of the shared local arrays. */
@@ -61,6 +63,7 @@ function drapeArrays<A, K>(backend: Backend<A, K>, problem: DrapeProblem): Drape
     elemGrad: scratch("elem_grad", 9 * m.triangles + 12 * m.hinges + 3 * m.rows),
     elemHess: scratch("elem_hess", 81 * m.triangles + 144 * m.hinges + 9 * m.rows),
     elemDelta: scratch("elem_delta", m.triangles + m.hinges + m.rows),
+    regularization: backend.array("regularization", new Float32Array(1), "read"),
   };
 }
 
@@ -85,7 +88,7 @@ function hingeSpec<A>(sources: KernelSources, problem: DrapeProblem, a: DrapeArr
 function inertiaSpec<A>(sources: KernelSources, problem: DrapeProblem, a: DrapeArrays<A>): KernelSpec<A> {
   const offsets = layout(problem);
   return { label: "inertia", source: sources.inertia, constants: { GRAD_OFFSET: offsets.inertiaGrad, HESS_OFFSET: offsets.inertiaHess },
-    bindings: { positions: a.positions, x_hat: a.xHat, row_vertex: a.rowVertex, row_mass: a.rowMass, elem_grad: a.elemGrad, elem_hess: a.elemHess } };
+    bindings: { positions: a.positions, x_hat: a.xHat, row_vertex: a.rowVertex, row_mass: a.rowMass, elem_grad: a.elemGrad, elem_hess: a.elemHess, regularization: a.regularization } };
 }
 
 function assemblySpecs<A, K>(sources: KernelSources, a: DrapeArrays<A>, solver: PreparedSolver<A, K>): readonly KernelSpec<A>[] {
@@ -116,10 +119,10 @@ function workgroups(problem: DrapeProblem): { readonly elements: number; readonl
   return { elements: count(problem.manifest.triangles), hinges: count(problem.manifest.hinges), rows: count(problem.manifest.rows) };
 }
 
-export async function prepareDrapeGpu<A, K>(backend: Backend<A, K>, problem: DrapeProblem, sources: KernelSources): Promise<DrapeGpu<A, K>> {
+/** `projected` picks the simulation tangent (clamped membrane + Gauss–Newton hinge); it defaults to the problem's own kind. */
+export async function prepareDrapeGpu<A, K>(backend: Backend<A, K>, problem: DrapeProblem, sources: KernelSources, projected = problem.manifest.tangent === "projected"): Promise<DrapeGpu<A, K>> {
   const solver = await prepareSolver(backend, linearProblem(problem), sources);
   const a = drapeArrays(backend, problem);
-  const projected = problem.manifest.tangent === "projected";
   const specs = [membraneSpec(sources, problem, a, projected), hingeSpec(sources, problem, a, !projected), inertiaSpec(sources, problem, a),
     ...assemblySpecs(sources, a, solver), ...energySpecs(sources, problem, a),
     membraneSpec(sources, problem, a, false), hingeSpec(sources, problem, a, true), membraneSpec(sources, problem, a, true), hingeSpec(sources, problem, a, false)];
@@ -127,10 +130,11 @@ export async function prepareDrapeGpu<A, K>(backend: Backend<A, K>, problem: Dra
     await Promise.all(specs.map((spec) => backend.kernel(spec)));
   const n = workgroups(problem);
   return {
-    backend, solver, positions: a.positions, xHat: a.xHat, direction: a.direction, step: a.step, elemGrad: a.elemGrad, elemHess: a.elemHess, elemDelta: a.elemDelta,
+    backend, solver, positions: a.positions, xHat: a.xHat, regularization: a.regularization, direction: a.direction, step: a.step, elemGrad: a.elemGrad, elemHess: a.elemHess, elemDelta: a.elemDelta,
     evaluate: [{ kernel: membrane, workgroups: n.elements }, { kernel: hinge, workgroups: n.hinges }, { kernel: inertia, workgroups: n.rows },
       { kernel: matrix, workgroups: n.rows }, { kernel: force, workgroups: n.rows }],
     energyChange: [{ kernel: membraneDelta, workgroups: n.elements }, { kernel: hingeDelta, workgroups: n.hinges }, { kernel: inertiaDelta, workgroups: n.rows }],
+    inertia: [{ kernel: inertia, workgroups: n.rows }],
     exactElements: [{ kernel: membraneExact, workgroups: n.elements }, { kernel: hingeExact, workgroups: n.hinges }],
     projectedElements: [{ kernel: membraneProjected, workgroups: n.elements }, { kernel: hingeGaussNewton, workgroups: n.hinges }],
   };

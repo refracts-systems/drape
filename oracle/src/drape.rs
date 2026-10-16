@@ -5,7 +5,7 @@ use crate::linalg::{dot, identity_scaled, vector_norm, Mat3, Vec3};
 use crate::material::Material;
 use crate::membrane::MembraneElement;
 use crate::mesh::Mesh;
-use crate::newton::{solve_step, NewtonSettings, NewtonSystem, StepSolution};
+use crate::newton::{solve_step, solve_step_regularized, NewtonSettings, NewtonSystem, RegularizedSystem, StepSolution};
 
 /// 1.0 s of backward Euler at h = 1/240 s.
 pub const STEPS: usize = 240;
@@ -193,6 +193,15 @@ impl NewtonSystem for DrapeStep<'_> {
     }
 }
 
+impl RegularizedSystem for DrapeStep<'_> {
+    /// K + μ·M/h²: the tangent of the drape's kind with μ times the inertia block added on the diagonal.
+    fn regularized_tangent(&self, x: &[Vec3], mu: f64) -> Bsr {
+        let mut matrix = self.tangent(x);
+        self.drape.free.iter().enumerate().for_each(|(row, &i)| matrix.add(row, row, &identity_scaled(mu * self.drape.mass_over_h2(i))));
+        matrix
+    }
+}
+
 /// One time step from (x, v): Newton on Φ starting at x̂, residual scaled by ‖∇Φ(x)‖.
 pub struct TimeStep {
     pub solution: StepSolution,
@@ -200,10 +209,10 @@ pub struct TimeStep {
     pub velocity: Vec<Vec3>,
 }
 
-pub fn time_step(drape: &Drape, x: &[Vec3], v: &[Vec3], settings: &NewtonSettings) -> Result<TimeStep, String> {
+pub fn time_step(drape: &Drape, x: &[Vec3], v: &[Vec3], settings: &NewtonSettings, regularized: bool) -> Result<TimeStep, String> {
     let step = DrapeStep { drape, x_hat: drape.prediction(x, v) };
     let scale = vector_norm(&step.residual(x));
-    let solution = solve_step(&step, step.x_hat.clone(), scale, settings)?;
+    let solution = if regularized { solve_step_regularized(&step, step.x_hat.clone(), scale, settings)? } else { solve_step(&step, step.x_hat.clone(), scale, settings)? };
     let velocity = solution.positions.iter().zip(x).map(|(p, q)| std::array::from_fn(|d| (p[d] - q[d]) / TIME_STEP)).collect();
     Ok(TimeStep { solution, scale, velocity })
 }
@@ -215,12 +224,12 @@ pub struct Trajectory {
     pub steps: Vec<TimeStep>,
 }
 
-pub fn simulate(drape: &Drape, steps: usize, settings: &NewtonSettings) -> Result<Trajectory, String> {
+pub fn simulate(drape: &Drape, steps: usize, settings: &NewtonSettings, regularized: bool) -> Result<Trajectory, String> {
     let rest = drape.rest_positions();
     let mut trajectory = Trajectory { velocities: vec![vec![[0.0; 3]; rest.len()]], positions: vec![rest], steps: Vec::new() };
     for _ in 0..steps {
         let (x, v) = (trajectory.positions.last().unwrap(), trajectory.velocities.last().unwrap());
-        let step = time_step(drape, x, v, settings)?;
+        let step = time_step(drape, x, v, settings, regularized)?;
         trajectory.positions.push(step.solution.positions.clone());
         trajectory.velocities.push(step.velocity.clone());
         trajectory.steps.push(step);
@@ -258,7 +267,7 @@ mod tests {
     #[test]
     fn first_step_falls_by_h_squared_g_and_energy_decreases() {
         let drape = Drape::build(9, TangentKind::Projected);
-        let trajectory = simulate(&drape, 3, &reference_settings()).unwrap();
+        let trajectory = simulate(&drape, 3, &reference_settings(), false).unwrap();
         let centre = drape.mesh.rest.len() / 2;
         let drop = trajectory.positions[1][centre][2];
         assert!((drop + TIME_STEP * TIME_STEP * GRAVITY).abs() < 1e-6, "{drop}");

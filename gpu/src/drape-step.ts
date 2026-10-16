@@ -3,7 +3,7 @@ import type { DrapeGpu } from "./drape-gpu.ts";
 import { assemble, norm32, solveStep, type IterationRecord, type NewtonContext, type NewtonModel } from "./newton.ts";
 
 /** Positions and velocities of one f32 state. */
-interface State {
+export interface State {
   readonly positions: Float32Array<ArrayBuffer>;
   readonly velocity: Float32Array<ArrayBuffer>;
 }
@@ -19,11 +19,11 @@ export interface ProbeResult {
   readonly iterates: readonly Float32Array<ArrayBuffer>[];
 }
 
-const drapeModel = (problem: DrapeProblem): NewtonModel =>
+export const drapeModel = (problem: DrapeProblem): NewtonModel =>
   ({ newton: problem.manifest.newton, pcg: problem.manifest.pcg, rowVertex: problem.u32.row_vertex, vertices: problem.manifest.vertices });
 
 /** x̂ = x + h·v + h²·g on free vertices in f32 arithmetic (same order as the oracle); pinned vertices stay. */
-function prediction(problem: DrapeProblem, state: State): Float32Array<ArrayBuffer> {
+export function prediction(problem: DrapeProblem, state: State): Float32Array<ArrayBuffer> {
   const h = Math.fround(problem.manifest.time_step_s);
   const fall = Math.fround(Math.fround(h * h) * Math.fround(-problem.manifest.gravity_m_per_s2));
   const predicted = Float32Array.from(state.positions);
@@ -38,7 +38,7 @@ function prediction(problem: DrapeProblem, state: State): Float32Array<ArrayBuff
 }
 
 /** Backward-Euler velocity (x_{n+1} − x_n)/h, rounded to f32. */
-function velocityOf(next: Float32Array, previous: Float32Array, timeStep: number): Float32Array<ArrayBuffer> {
+export function velocityOf(next: Float32Array, previous: Float32Array, timeStep: number): Float32Array<ArrayBuffer> {
   return Float32Array.from(next, (value, i) => (value - previous[i]) / timeStep);
 }
 
