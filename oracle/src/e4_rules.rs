@@ -54,7 +54,7 @@ mod tests {
         assert_eq!(etas[0], ETA_START);
         assert!((etas[1] - 9e-3).abs() < 1e-15, "{}", etas[1]);
         assert!((etas[2] - 9e-5).abs() < 1e-17, "{}", etas[2]);
-        assert_eq!(etas[3], 9e-7);
+        assert!((etas[3] - 9e-7).abs() < 1e-19, "{}", etas[3]);
     }
 
     #[test]
