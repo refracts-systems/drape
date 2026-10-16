@@ -13,7 +13,7 @@ import { assertTargetAdapter, hostInfo } from "./hardware.ts";
 import { createVgpuBackend, type VgpuAdapter } from "./vgpu-backend.ts";
 
 const RECORD_FIELDS = ["step", "iteration", "relativeResidual", "pcgIterations", "pcgStatus", "linearResidual", "stepLength", "halvings", "status"] as const;
-const EXTRA_FIELDS = ["eta", "mu", "updateInf", "stepInf", "retries"] as const;
+const EXTRA_FIELDS = ["eta", "mu", "updateInf", "stepInf", "retries", "resolution"] as const;
 
 /** A: E3 configuration. B: + floor-aware stop. C: + Eisenstat–Walker forcing. D: + regularised exact tangent. */
 const RUNGS = {

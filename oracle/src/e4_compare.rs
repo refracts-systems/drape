@@ -9,30 +9,32 @@ use crate::newton::MU_CAP;
 use std::fs;
 use std::path::Path;
 
-const KERNEL_LIMIT: f64 = 1e-5;
+pub const KERNEL_LIMIT: f64 = 1e-5;
 /// f32 replay of the GPU forcing terms must match the f64 rule to f32 precision.
-const FORCING_REPLAY_LIMIT: f64 = 1e-5;
+pub const FORCING_REPLAY_LIMIT: f64 = 1e-5;
 const FLOOR_FACTOR: f64 = 2.0;
 /// Mean GPU Newton iterations per step may exceed the f64 oracle mean by at most this many.
-const NEWTON_EXCESS_LIMIT: f64 = 2.0;
+pub const NEWTON_EXCESS_LIMIT: f64 = 2.0;
 /// E3 n65 ms per step divided by 10.
 const N65_MS_LIMIT: f64 = 174.0;
 const RECORD_FIELDS: usize = 9;
-const EXTRA_FIELDS: usize = 5;
 const STATUS_RESIDUAL: f64 = 1.0;
 const STATUS_UPDATE: f64 = 4.0;
 
-/// One GPU iterate: its IterationRecord fields and the robust-Newton inputs recorded next to it.
-struct Iterate {
-    step: usize,
-    relative: f64,
-    pcg_iterations: f64,
-    status: f64,
-    eta: f64,
-    mu: f64,
-    update_inf: f64,
-    step_inf: f64,
-    retries: f64,
+/// One GPU iterate: its IterationRecord fields and the robust-Newton inputs recorded next to it (NaN when a run did not record one).
+pub struct Iterate {
+    pub step: usize,
+    pub relative: f64,
+    pub pcg_iterations: f64,
+    pub status: f64,
+    pub eta: f64,
+    pub mu: f64,
+    pub update_inf: f64,
+    pub step_inf: f64,
+    pub retries: f64,
+    pub resolution: f64,
+    pub alpha_max: f64,
+    pub min_distance: f64,
 }
 
 fn read_f64_rows(path: &Path, width: usize) -> Result<Vec<Vec<f64>>, String> {
@@ -41,15 +43,29 @@ fn read_f64_rows(path: &Path, width: usize) -> Result<Vec<Vec<f64>>, String> {
     Ok(values.chunks_exact(width).map(<[f64]>::to_vec).collect())
 }
 
-fn read_iterates(dir: &Path, prefix: &str) -> Result<Vec<Iterate>, String> {
+/// The quoted names of a JSON string array (`"robust_fields": ["eta", …]`).
+fn names(text: &str, key: &str) -> Vec<String> {
+    let Some(start) = text.find(&format!("\"{key}\"")) else { return Vec::new() };
+    let open = start + text[start..].find('[').unwrap_or(0);
+    let close = open + text[open..].find(']').unwrap_or(0);
+    text[open..close].split('"').skip(1).step_by(2).map(str::to_string).collect()
+}
+
+/// Robust records are read by the field names listed in gpu-result.json, so E4 runs (5 fields) and later runs score alike.
+pub fn read_iterates(dir: &Path, prefix: &str) -> Result<Vec<Iterate>, String> {
+    let gpu = fs::read_to_string(dir.join("gpu-result.json")).map_err(|e| e.to_string())?;
+    let fields = names(&gpu, "robust_fields");
     let records = read_f64_rows(&dir.join(format!("gpu-{prefix}iterations.bin")), RECORD_FIELDS)?;
-    let extras = read_f64_rows(&dir.join(format!("gpu-{prefix}robust.bin")), EXTRA_FIELDS)?;
+    let extras = read_f64_rows(&dir.join(format!("gpu-{prefix}robust.bin")), fields.len())?;
+    let pick = |e: &[f64], name: &str| fields.iter().position(|f| f == name).map_or(f64::NAN, |i| e[i]);
     Ok(records.iter().zip(&extras).map(|(r, e)| Iterate {
-        step: r[0] as usize, relative: r[2], pcg_iterations: r[3], status: r[8], eta: e[0], mu: e[1], update_inf: e[2], step_inf: e[3], retries: e[4],
+        step: r[0] as usize, relative: r[2], pcg_iterations: r[3], status: r[8], eta: pick(e, "eta"), mu: pick(e, "mu"), update_inf: pick(e, "updateInf"),
+        step_inf: pick(e, "stepInf"), retries: pick(e, "retries"), resolution: pick(e, "resolution"), alpha_max: pick(e, "alphaMax"),
+        min_distance: pick(e, "minDistance"),
     }).collect())
 }
 
-fn by_step(iterates: &[Iterate]) -> Vec<Vec<&Iterate>> {
+pub fn by_step(iterates: &[Iterate]) -> Vec<Vec<&Iterate>> {
     let mut groups: Vec<Vec<&Iterate>> = Vec::new();
     for it in iterates {
         match groups.last_mut() {
@@ -61,7 +77,7 @@ fn by_step(iterates: &[Iterate]) -> Vec<Vec<&Iterate>> {
 }
 
 /// Largest relative gap between the GPU's recorded η and the f64 rule replayed on its recorded residuals.
-fn forcing_replay(groups: &[Vec<&Iterate>], forcing: bool, fixed: f64) -> f64 {
+pub fn forcing_replay(groups: &[Vec<&Iterate>], forcing: bool, fixed: f64) -> f64 {
     groups.iter().flat_map(|group| {
         let updates: Vec<&&Iterate> = group.iter().filter(|it| it.pcg_iterations.is_finite()).collect();
         let norms: Vec<f64> = updates.iter().map(|it| it.relative).collect();
@@ -71,18 +87,18 @@ fn forcing_replay(groups: &[Vec<&Iterate>], forcing: bool, fixed: f64) -> f64 {
 }
 
 /// Every update-rule stop is justified by its last update, and with the floor stop on, no update the rule would stop on was followed.
-fn termination_replay(groups: &[Vec<&Iterate>], floor_stop: bool) -> bool {
+pub fn termination_replay(groups: &[Vec<&Iterate>], floor_stop: bool) -> bool {
     groups.iter().all(|group| {
         let updates: Vec<&&Iterate> = group.iter().filter(|it| it.pcg_iterations.is_finite() && it.update_inf.is_finite()).collect();
         let stopped = group.last().is_some_and(|it| it.status == STATUS_UPDATE);
-        let last_ok = !stopped || updates.last().is_some_and(|it| update_is_small(it.update_inf, it.step_inf));
-        let early = updates.iter().rev().skip(usize::from(stopped)).any(|it| update_is_small(it.update_inf, it.step_inf));
+        let last_ok = !stopped || updates.last().is_some_and(|it| update_is_small(it.update_inf, it.step_inf, resolution_of(it)));
+        let early = updates.iter().rev().skip(usize::from(stopped)).any(|it| update_is_small(it.update_inf, it.step_inf, resolution_of(it)));
         last_ok && !(floor_stop && early)
     })
 }
 
 /// WGSL inertia kernel at x = kernel state, x̂ = rest, μ = kernel_mu vs f64: gradient (M/h²)(x − x̂), block (1 + μ)(M/h²)I.
-fn inertia_error(drape: &Drape, dir: &Path) -> Result<f64, String> {
+pub fn inertia_error(drape: &Drape, dir: &Path) -> Result<f64, String> {
     let gpu = read_f32_file(&dir.join("gpu-kernel.bin"))?;
     let rows = drape.rows();
     let start = gpu.len() - 12 * rows;
@@ -96,27 +112,36 @@ fn inertia_error(drape: &Drape, dir: &Path) -> Result<f64, String> {
     Ok(difference_norm(&got, &expected) / vector_norm(&expected))
 }
 
-/// Mean f64 Newton iterations per step and steps that hit the μ cap, from reference.bin.
-fn oracle_stats(dir: &Path) -> Result<(f64, f64, f64), String> {
+/// f64 reference statistics from reference.bin: mean Newton iterations, unconverged steps, steps converged at the measured
+/// floor rather than the tolerance (0 for references without that branch), and steps that hit the μ cap.
+pub struct OracleStats {
+    pub mean: f64,
+    pub unconverged: f64,
+    pub at_floor: f64,
+    pub caps: f64,
+}
+
+pub fn oracle_stats(dir: &Path) -> Result<OracleStats, String> {
     let manifest = fs::read_to_string(dir.join("reference.json")).map_err(|e| e.to_string())?;
     let bytes = fs::read(dir.join("reference.bin")).map_err(|e| e.to_string())?;
     let array = |name: &str| locate(&manifest, name).map(|(offset, length)| read_f64(&bytes, offset, length));
     let (iterations, converged, caps) = (array("newton_iterations")?, array("converged")?, array("mu_cap_hit")?);
     let mean = iterations.iter().sum::<f64>() / iterations.len() as f64;
-    Ok((mean, iterations.len() as f64 - converged.iter().sum::<f64>(), caps.iter().sum()))
+    let at_floor = array("converged_at_floor").map_or(0.0, |a| a.iter().sum());
+    Ok(OracleStats { mean, unconverged: iterations.len() as f64 - converged.iter().sum::<f64>(), at_floor, caps: caps.iter().sum() })
 }
 
 /// Per-step GPU statistics of one rung's trajectory.
-struct Trajectory {
-    newton_per_step: f64,
-    pcg_per_solve: f64,
+pub struct Trajectory {
+    pub newton_per_step: f64,
+    pub pcg_per_solve: f64,
     stops: [usize; 6],
     regularized_steps: usize,
     retries: f64,
     max_mu: f64,
 }
 
-fn trajectory_stats(groups: &[Vec<&Iterate>]) -> Trajectory {
+pub fn trajectory_stats(groups: &[Vec<&Iterate>]) -> Trajectory {
     let solves: Vec<&&Iterate> = groups.iter().flatten().filter(|it| it.pcg_iterations.is_finite()).collect();
     let mut stops = [0usize; 6];
     groups.iter().filter_map(|g| g.last()).for_each(|it| stops[(it.status as usize).min(5)] += 1);
@@ -131,14 +156,14 @@ fn trajectory_stats(groups: &[Vec<&Iterate>]) -> Trajectory {
 }
 
 /// A probe stops properly when it reaches the residual rule, or the update rule within 2x of the representation floor.
-fn probe_stops_ok(probes: &[ProbeSummary], groups: &[Vec<&Iterate>]) -> bool {
+pub fn probe_stops_ok(probes: &[ProbeSummary], groups: &[Vec<&Iterate>]) -> bool {
     probes.iter().all(|p| {
         let status = groups.iter().find(|g| g[0].step == p.step).and_then(|g| g.last()).map_or(f64::NAN, |it| it.status);
         status == STATUS_RESIDUAL || (status == STATUS_UPDATE && p.f32_floor <= FLOOR_FACTOR * p.representation_floor)
     })
 }
 
-fn probes_json(probes: &[ProbeSummary], groups: &[Vec<&Iterate>]) -> String {
+pub fn probes_json(probes: &[ProbeSummary], groups: &[Vec<&Iterate>]) -> String {
     let rows: Vec<String> = probes.iter().map(|p| {
         let status = groups.iter().find(|g| g[0].step == p.step).and_then(|g| g.last()).map_or(f64::NAN, |it| it.status);
         Json::new().integer("step", p.step).number("one_step_displacement_error", p.error).number("f32_floor", p.f32_floor)
@@ -147,7 +172,7 @@ fn probes_json(probes: &[ProbeSummary], groups: &[Vec<&Iterate>]) -> String {
     format!("[{}]", rows.join(","))
 }
 
-fn robust_json(t: &Trajectory, gpu: &str) -> Json {
+pub fn robust_json(t: &Trajectory, gpu: &str) -> Json {
     let names = ["running", "residual_rule", "iteration_limit", "line_search_failed", "update_rule", "regularization_cap"];
     let stops = names.iter().zip(t.stops).fold(Json::new(), |json, (name, count)| json.integer(name, count));
     Json::new()
@@ -159,7 +184,7 @@ fn robust_json(t: &Trajectory, gpu: &str) -> Json {
         .number("max_mu", t.max_mu)
         .number("ms_per_step", number(gpu, "", "ms_per_step"))
         .raw("phase_ms_per_step", Json::new().number("assembly", number(gpu, "phase_ms_per_step", "assembly")).number("pcg", number(gpu, "phase_ms_per_step", "pcg"))
-            .number("line_search", number(gpu, "phase_ms_per_step", "line_search")).number("io", number(gpu, "phase_ms_per_step", "io"))
+            .number("line_search", number(gpu, "phase_ms_per_step", "line_search")).number("ccd", number(gpu, "phase_ms_per_step", "ccd")).number("io", number(gpu, "phase_ms_per_step", "io"))
             .number("other", number(gpu, "phase_ms_per_step", "other")).render())
 }
 
@@ -168,7 +193,7 @@ pub fn run(dir: &Path, rung: &str) -> Result<(), String> {
     let gpu_dir = dir.join(format!("rung-{rung}"));
     let problem = fs::read_to_string(dir.join("problem.json")).map_err(|e| e.to_string())?;
     let gpu = fs::read_to_string(gpu_dir.join("gpu-result.json")).map_err(|e| e.to_string())?;
-    let drape = Drape::build(number(&problem, "", "grid_columns") as usize, TangentKind::Exact);
+    let drape = Drape::from_problem(&problem, TangentKind::Exact);
     let base = score(dir, &gpu_dir)?;
     let groups_owned = read_iterates(&gpu_dir, "")?;
     let groups = by_step(&groups_owned);
@@ -195,18 +220,23 @@ pub fn run(dir: &Path, rung: &str) -> Result<(), String> {
         let probes = probe_summaries(dir, &gpu_dir)?;
         let probe_groups_owned = read_iterates(&gpu_dir, "probe-")?;
         let probe_groups = by_step(&probe_groups_owned);
-        let (oracle_mean, oracle_unconverged, oracle_caps) = oracle_stats(dir)?;
+        let oracle = oracle_stats(dir)?;
         verdict = verdict
-            .flag("f64_converged_every_step", oracle_unconverged == 0.0 && oracle_caps == 0.0)
+            .flag("f64_converged_every_step", oracle.unconverged == 0.0 && oracle.caps == 0.0)
             .flag("energy_f64_ok", flag(&base, "verdict", "energy_f64_ok"))
             .flag("one_step_ok", flag(&base, "verdict", "one_step_ok"))
             .flag("f32_stops_ok_at_probes", probe_stops_ok(&probes, &probe_groups))
-            .flag("newton_iterations_ok", stats.newton_per_step <= oracle_mean + NEWTON_EXCESS_LIMIT);
-        json = json.raw("oracle", Json::new().number("mean_newton_iterations", oracle_mean).number("unconverged_steps", oracle_unconverged)
-            .number("mu_cap_steps", oracle_caps).number("mu_cap", MU_CAP).render()).raw("probes", probes_json(&probes, &probe_groups));
+            .flag("newton_iterations_ok", stats.newton_per_step <= oracle.mean + NEWTON_EXCESS_LIMIT);
+        json = json.raw("oracle", Json::new().number("mean_newton_iterations", oracle.mean).number("unconverged_steps", oracle.unconverged).number("converged_at_floor_steps", oracle.at_floor)
+            .number("mu_cap_steps", oracle.caps).number("mu_cap", MU_CAP).render()).raw("probes", probes_json(&probes, &probe_groups));
     }
     let rendered = json.raw("robust", e4.render()).raw("verdict", verdict.render()).raw("e3_checks", base).render();
     write_text(&gpu_dir.join("result.json"), &rendered)?;
     println!("{rendered}");
     Ok(())
+}
+
+/// The recorded f32 spacing behind an update-rule decision; runs without the E4-final rule recorded none (0).
+fn resolution_of(it: &Iterate) -> f64 {
+    if it.resolution.is_finite() { it.resolution } else { 0.0 }
 }

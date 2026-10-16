@@ -1,6 +1,6 @@
 import type { Backend } from "./backend.ts";
 
-export type Phase = "assembly" | "pcg" | "line_search" | "other";
+export type Phase = "assembly" | "pcg" | "line_search" | "ccd" | "other";
 
 /** Wall-clock time of GPU submits per Newton phase, and of host readbacks/writes (vgpu has no GPU timestamps). */
 export interface PhaseClock {
@@ -9,7 +9,7 @@ export interface PhaseClock {
   ioMs: number;
 }
 
-export const createPhaseClock = (): PhaseClock => ({ current: "other", runMs: { assembly: 0, pcg: 0, line_search: 0, other: 0 }, ioMs: 0 });
+export const createPhaseClock = (): PhaseClock => ({ current: "other", runMs: { assembly: 0, pcg: 0, line_search: 0, ccd: 0, other: 0 }, ioMs: 0 });
 
 /** The same backend, with every run() charged to the clock's current phase and every read()/write() to host I/O. */
 export function timeBackend<A, K>(inner: Backend<A, K>, clock: PhaseClock): Backend<A, K> {

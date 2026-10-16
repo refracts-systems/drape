@@ -109,6 +109,12 @@ impl Json {
         self
     }
 
+    /// The fields of `self` followed by those of `other`.
+    pub fn extend(mut self, other: Json) -> Json {
+        self.fields.extend(other.fields);
+        self
+    }
+
     pub fn render(&self) -> String {
         format!("{{{}}}", self.fields.join(","))
     }

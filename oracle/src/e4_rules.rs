@@ -29,19 +29,29 @@ pub fn forcing_sequence(norms: &[f64]) -> Vec<f64> {
     }).collect()
 }
 
-pub fn update_is_small(update_inf: f64, step_inf: f64) -> bool {
-    update_inf <= UPDATE_STOP * step_inf
+/// Factor on the f32 position spacing below which an update cannot move any coordinate meaningfully (E4-final and E5).
+pub const RESOLUTION_FACTOR: f64 = 2.0;
+
+/// Spacing of f32 numbers at `max_abs`: 2^(floor(log2(max_abs)) − 23), read from the f32 exponent bits.
+pub fn f32_spacing(max_abs: f64) -> f64 {
+    let exponent = ((max_abs as f32).to_bits() >> 23) & 0xff;
+    2f64.powi(exponent as i32 - 127 - 23)
+}
+
+/// ‖αd‖∞ ≤ max(1e-4·‖x − x_n‖∞, 2·res); `resolution` is the recorded f32 spacing (0 for runs without the E4-final rule).
+pub fn update_is_small(update_inf: f64, step_inf: f64, resolution: f64) -> bool {
+    update_inf <= (UPDATE_STOP * step_inf).max(RESOLUTION_FACTOR * resolution)
 }
 
 /// μ used by the WGSL inertia-kernel check: the regularised diagonal block must equal (1 + μ)·m/h².
 pub const KERNEL_MU: f64 = 0.37;
 
 /// The rule constants the GPU host loop reads from problem.json (one source of truth with the oracle).
-pub fn settings_json() -> Json {
+pub fn settings_json(resolution_factor: f64) -> Json {
     Json::new()
         .number("eta_start", ETA_START).number("eta_min", ETA_MIN).number("eta_max", ETA_MAX).number("eta_gamma", GAMMA)
         .number("eta_safeguard", SAFEGUARD_THRESHOLD).number("update_stop", UPDATE_STOP)
-        .number("mu_start", MU_START).number("mu_cap", MU_CAP).number("kernel_mu", KERNEL_MU)
+        .number("resolution_factor", resolution_factor).number("mu_start", MU_START).number("mu_cap", MU_CAP).number("kernel_mu", KERNEL_MU)
 }
 
 #[cfg(test)]
@@ -65,7 +75,15 @@ mod tests {
 
     #[test]
     fn update_rule_compares_with_the_step_taken() {
-        assert!(update_is_small(1e-9, 1e-4));
-        assert!(!update_is_small(2e-8, 1e-4));
+        assert!(update_is_small(1e-9, 1e-4, 0.0));
+        assert!(!update_is_small(2e-8, 1e-4, 0.0));
+        assert!(update_is_small(1e-7, 1e-4, f32_spacing(0.5)));
+    }
+
+    #[test]
+    fn f32_spacing_reads_the_binade() {
+        assert_eq!(f32_spacing(0.5), 2f64.powi(-24));
+        assert_eq!(f32_spacing(0.49999997), 2f64.powi(-25));
+        assert_eq!(f32_spacing(1.0), 2f64.powi(-23));
     }
 }

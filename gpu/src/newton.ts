@@ -77,12 +77,12 @@ export async function energyChange<A, K>(gpu: NewtonGpu<A, K>, stepLength: numbe
   return deltas.reduce((sum, v) => Math.fround(sum + v), 0);
 }
 
-/** Backtracking from α = 1 until ΔΠ ≤ c·α·gᵀd; null when d is not a descent direction or halving runs out. */
-export async function lineSearch<A, K>(context: NewtonContext<A, K>, slope: number): Promise<LineSearch | null> {
+/** Backtracking from α = `initial` (1 unless a barrier limits it) until ΔΠ ≤ c·α·gᵀd; null when d is not a descent direction or halving runs out. */
+export async function lineSearch<A, K>(context: NewtonContext<A, K>, slope: number, initial = 1): Promise<LineSearch | null> {
   const { armijo, max_halvings } = context.model.newton;
   if (!(slope < 0)) return null;
   for (let halvings = 0; halvings <= max_halvings; halvings += 1) {
-    const stepLength = 0.5 ** halvings;
+    const stepLength = initial * 0.5 ** halvings;
     if (await energyChange(context.gpu, stepLength) <= Math.fround(armijo * stepLength * slope)) return { stepLength, halvings };
   }
   return null;

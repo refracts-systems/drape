@@ -18,6 +18,8 @@ export interface DrapeManifest {
   readonly material: Material;
   readonly newton: NewtonSettings;
   readonly pcg: PcgSettings;
+  /** Line-search keep fraction of the colliders (NaN without a "contact" section). */
+  readonly keep_fraction: number;
   readonly arrays: readonly ArrayEntry[];
 }
 
@@ -32,6 +34,7 @@ export interface DrapeProblem {
   readonly manifest: DrapeManifest;
   readonly f32: Readonly<Record<DrapeF32Name, Float32Array<ArrayBuffer>>>;
   readonly u32: Readonly<Record<DrapeU32Name, Uint32Array<ArrayBuffer>>>;
+  readonly contact: DrapeContact;
 }
 
 const SIZES = ["grid_columns", "vertices", "triangles", "hinges", "rows", "unknowns", "blocks", "steps", "probes", "time_step_s", "gravity_m_per_s2"] as const;
@@ -46,6 +49,7 @@ export function parseDrapeManifest(text: string): DrapeManifest {
     material: numbers(Reflect.get(value, "material"), ["wale_N_per_m", "course_N_per_m", "coupling_N_per_m", "shear_N_per_m"] as const, "material"),
     newton: numbers(Reflect.get(value, "newton"), ["tolerance", "max_iterations", "armijo", "max_halvings"] as const, "newton"),
     pcg: numbers(Reflect.get(value, "pcg"), ["tolerance", "max_iterations", "replace_every", "replace_above"] as const, "pcg"),
+    keep_fraction: keepFraction(Reflect.get(value, "contact")),
     arrays: field(value, "arrays", isArray).map(parseEntry),
   };
 }
@@ -53,5 +57,25 @@ export function parseDrapeManifest(text: string): DrapeManifest {
 export function parseDrapeProblem(manifest: DrapeManifest, bytes: ArrayBuffer): DrapeProblem {
   const f32 = Object.fromEntries(F32_ARRAYS.map((name) => [name, new Float32Array(slice(manifest, bytes, name, "f32"))]));
   const u32 = Object.fromEntries(U32_ARRAYS.map((name) => [name, new Uint32Array(slice(manifest, bytes, name, "u32"))]));
-  return { manifest, f32: f32 as Record<DrapeF32Name, Float32Array<ArrayBuffer>>, u32: u32 as Record<DrapeU32Name, Uint32Array<ArrayBuffer>> };
+  return { manifest, f32: f32 as Record<DrapeF32Name, Float32Array<ArrayBuffer>>, u32: u32 as Record<DrapeU32Name, Uint32Array<ArrayBuffer>>, contact: parseContact(manifest, bytes) };
+}
+
+/** Experiment 5 colliders ([count, d̂, κ, 0, 8 floats per collider]) and the contact kernel-check state; no colliders before. */
+export interface DrapeContact {
+  readonly colliders: Float32Array<ArrayBuffer>;
+  readonly state: Float32Array<ArrayBuffer> | null;
+  readonly count: number;
+}
+
+const has = (manifest: DrapeManifest, name: string): boolean => manifest.arrays.some((entry) => entry.name === name);
+
+function parseContact(manifest: DrapeManifest, bytes: ArrayBuffer): DrapeContact {
+  if (!has(manifest, "colliders")) return { colliders: new Float32Array(4), state: null, count: 0 };
+  const colliders = new Float32Array(slice(manifest, bytes, "colliders", "f32"));
+  return { colliders, state: new Float32Array(slice(manifest, bytes, "contact_state", "f32")), count: colliders[0] };
+}
+
+function keepFraction(contact: unknown): number {
+  const value: unknown = isObject(contact) ? Reflect.get(contact, "keep_fraction") : undefined;
+  return typeof value === "number" ? value : Number.NaN;
 }

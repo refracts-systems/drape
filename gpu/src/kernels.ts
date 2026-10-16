@@ -12,8 +12,9 @@ export const KERNEL_FILES = {
   assemble_force: { file: "assemble_force.wgsl", header: null },
   hinge_element: { file: "hinge_element.wgsl", header: "hinge.wgsl" },
   hinge_energy_change: { file: "hinge_energy_change.wgsl", header: "hinge.wgsl" },
-  inertia: { file: "inertia.wgsl", header: null },
-  inertia_energy_change: { file: "inertia_energy_change.wgsl", header: null },
+  inertia: { file: "inertia.wgsl", header: "contact.wgsl" },
+  inertia_energy_change: { file: "inertia_energy_change.wgsl", header: "contact.wgsl" },
+  ccd: { file: "ccd.wgsl", header: "contact.wgsl" },
 } as const;
 
 export type KernelName = keyof typeof KERNEL_FILES;

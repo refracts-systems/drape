@@ -11,6 +11,10 @@ pub trait NewtonSystem {
     fn energy_change(&self, x: &[Vec3], d: &[Vec3], alpha: f64) -> f64;
     fn scatter(&self, rows: &[f64]) -> Vec<Vec3>;
     fn gather(&self, vertices: &[Vec3]) -> Vec<f64>;
+    /// Largest step length the line search may start from (1 unless a barrier must stay positive).
+    fn max_step(&self, _x: &[Vec3], _d: &[Vec3]) -> f64 {
+        1.0
+    }
 }
 
 impl NewtonSystem for Coupon {
@@ -50,6 +54,7 @@ pub enum StepStatus {
     IterationLimit,
     LineSearchFailed,
     RegularizationCap,
+    ConvergedAtFloor,
 }
 
 impl StepStatus {
@@ -59,7 +64,12 @@ impl StepStatus {
             StepStatus::IterationLimit => "iteration_limit",
             StepStatus::LineSearchFailed => "line_search_failed",
             StepStatus::RegularizationCap => "regularization_cap",
+            StepStatus::ConvergedAtFloor => "converged_at_floor",
         }
+    }
+
+    pub fn converged(&self) -> bool {
+        matches!(self, StepStatus::Converged | StepStatus::ConvergedAtFloor)
     }
 }
 
@@ -70,6 +80,25 @@ pub struct StepSolution {
     pub searches: Vec<LineSearch>,
     pub status: StepStatus,
     pub regularization: Regularization,
+    pub trace: Vec<IterateTrace>,
+}
+
+impl StepSolution {
+    fn start(positions: Vec<Vec3>) -> StepSolution {
+        StepSolution { positions, residuals: Vec::new(), searches: Vec::new(), status: StepStatus::IterationLimit, regularization: Regularization::default(), trace: Vec::new() }
+    }
+}
+
+/// One regularised update, for diagnosis: μ, step length, slope gᵀd, accepted ΔΦ, ‖αd‖∞, retries and the line-search start.
+#[derive(Clone, Copy, Debug)]
+pub struct IterateTrace {
+    pub mu: f64,
+    pub step_length: f64,
+    pub slope: f64,
+    pub energy_change: f64,
+    pub update_inf: f64,
+    pub retries: usize,
+    pub max_step: f64,
 }
 
 /// Levenberg–Marquardt bookkeeping of one step: largest μ used, failed factorisations or non-descent retries, cap reached.
@@ -97,7 +126,7 @@ pub fn relax_mu(mu: f64) -> f64 {
 
 /// Newton with an exact f64 band-Cholesky step and Armijo backtracking on the energy.
 pub fn solve_step<S: NewtonSystem>(system: &S, start: Vec<Vec3>, scale: f64, settings: &NewtonSettings) -> Result<StepSolution, String> {
-    let mut step = StepSolution { positions: start, residuals: Vec::new(), searches: Vec::new(), status: StepStatus::IterationLimit, regularization: Regularization::default() };
+    let mut step = StepSolution::start(start);
     loop {
         let gradient = system.residual(&step.positions);
         let relative = vector_norm(&gradient) / scale;
@@ -131,42 +160,79 @@ pub fn line_search<S: NewtonSystem>(system: &S, x: &[Vec3], gradient: &[f64], di
     if slope >= 0.0 {
         return None;
     }
+    let start = system.max_step(x, direction);
     (0..=settings.max_halvings)
-        .map(|halvings| LineSearch { step_length: 0.5f64.powi(halvings as i32), halvings })
+        .map(|halvings| LineSearch { step_length: start * 0.5f64.powi(halvings as i32), halvings })
         .find(|s| system.energy_change(x, direction, s.step_length) <= settings.armijo * s.step_length * slope)
 }
 
 /// A system whose tangent can be shifted by μ times its inertia (M/h² for the drape).
 pub trait RegularizedSystem: NewtonSystem {
     fn regularized_tangent(&self, x: &[Vec3], mu: f64) -> Bsr;
+    /// Rounding floor of ‖∇Φ‖: ε64·‖Σ_c |g_c|‖₂, the per-entry sum of absolute contributions to ∇Φ.
+    fn residual_floor(&self, x: &[Vec3]) -> f64;
+}
+
+/// Converged at the tolerance, or (with `floor_factor`) within `floor_factor` times the measured f64 floor.
+fn convergence(relative: f64, floor: f64, settings: &NewtonSettings, floor_factor: Option<f64>) -> Option<StepStatus> {
+    if relative <= settings.tolerance {
+        return Some(StepStatus::Converged);
+    }
+    floor_factor.filter(|factor| relative <= factor * floor).map(|_| StepStatus::ConvergedAtFloor)
 }
 
 /// Newton with K + μ·M/h²: μ rises on a non-positive-definite factorisation or a non-descent direction and relaxes after
 /// every accepted full step; μ starts at 0 in every step and stops the step at the cap.
-pub fn solve_step_regularized<S: RegularizedSystem>(system: &S, start: Vec<Vec3>, scale: f64, settings: &NewtonSettings) -> Result<StepSolution, String> {
-    let mut step = StepSolution { positions: start, residuals: Vec::new(), searches: Vec::new(), status: StepStatus::IterationLimit, regularization: Regularization::default() };
+pub fn solve_step_regularized<S: RegularizedSystem>(system: &S, start: Vec<Vec3>, scale: f64, settings: &NewtonSettings, floor_factor: Option<f64>) -> Result<StepSolution, String> {
+    let mut step = StepSolution::start(start);
     let mut mu = 0.0;
     loop {
         let gradient = system.residual(&step.positions);
         step.residuals.push(vector_norm(&gradient) / scale);
-        if *step.residuals.last().unwrap() <= settings.tolerance {
-            step.status = StepStatus::Converged;
+        let floor = if floor_factor.is_some() { system.residual_floor(&step.positions) / scale } else { f64::NAN };
+        if let Some(status) = convergence(*step.residuals.last().unwrap(), floor, settings, floor_factor) {
+            step.status = status;
             return Ok(step);
         }
         if step.searches.len() == settings.max_iterations {
             return Ok(step);
         }
-        let Some((direction, used)) = regularized_direction(system, &step.positions, &gradient, mu, &mut step.regularization) else {
-            step.status = StepStatus::RegularizationCap;
-            return Ok(step);
-        };
-        let Some(search) = line_search(system, &step.positions, &gradient, &direction, settings) else {
-            step.status = StepStatus::LineSearchFailed;
-            return Ok(step);
-        };
-        mu = if search.halvings == 0 { relax_mu(used) } else { used };
-        advance(&mut step.positions, &direction, search.step_length);
-        step.searches.push(search);
+        match regularized_update(system, &mut step, &gradient, mu, settings) {
+            Some(next) => mu = next,
+            None => return Ok(step),
+        }
+    }
+}
+
+/// Direction, line search, trace and advance; the next μ, or None (status set) when the step ends.
+fn regularized_update<S: RegularizedSystem>(system: &S, step: &mut StepSolution, gradient: &[f64], mu: f64, settings: &NewtonSettings) -> Option<f64> {
+    let retries_before = step.regularization.retries;
+    let Some((direction, used)) = regularized_direction(system, &step.positions, gradient, mu, &mut step.regularization) else {
+        step.status = StepStatus::RegularizationCap;
+        return None;
+    };
+    let Some(search) = line_search(system, &step.positions, gradient, &direction, settings) else {
+        step.status = StepStatus::LineSearchFailed;
+        return None;
+    };
+    let retries = step.regularization.retries - retries_before;
+    step.trace.push(trace_of(system, &step.positions, gradient, &direction, &search, used, retries));
+    advance(&mut step.positions, &direction, search.step_length);
+    let next = if search.halvings == 0 { relax_mu(used) } else { used };
+    step.searches.push(search);
+    Some(next)
+}
+
+fn trace_of<S: NewtonSystem>(system: &S, x: &[Vec3], gradient: &[f64], direction: &[Vec3], search: &LineSearch, mu: f64, retries: usize) -> IterateTrace {
+    let rows = system.gather(direction);
+    IterateTrace {
+        mu,
+        step_length: search.step_length,
+        slope: free_dot(gradient, &rows),
+        energy_change: system.energy_change(x, direction, search.step_length),
+        update_inf: search.step_length * rows.iter().fold(0.0f64, |m, v| m.max(v.abs())),
+        retries,
+        max_step: system.max_step(x, direction),
     }
 }
 

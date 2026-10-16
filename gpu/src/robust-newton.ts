@@ -9,13 +9,16 @@ import { inPhase, type PhaseClock } from "./timed-backend.ts";
 
 const CHUNK_ITERATIONS = 32;
 const RULE_KEYS = ["eta_start", "eta_min", "eta_max", "eta_gamma", "eta_safeguard", "update_stop", "mu_start", "mu_cap", "kernel_mu"] as const;
-export type RobustRules = Readonly<Record<(typeof RULE_KEYS)[number], number>>;
+/** `resolution_factor` is absent from E4 problems: 0 keeps the E4 update rule. */
+export type RobustRules = Readonly<Record<(typeof RULE_KEYS)[number] | "resolution_factor", number>>;
 
 /** Experiment 4 rule constants from problem.json (written by the oracle's e4_rules). */
 export function parseRobustRules(text: string): RobustRules {
   const value: unknown = JSON.parse(text);
   if (!isObject(value)) throw new Error("problem.json is not an object");
-  return numbers(Reflect.get(value, "robust"), RULE_KEYS, "robust");
+  const robust: unknown = Reflect.get(value, "robust");
+  const factor: unknown = isObject(robust) ? Reflect.get(robust, "resolution_factor") : undefined;
+  return { ...numbers(robust, RULE_KEYS, "robust"), resolution_factor: typeof factor === "number" ? factor : 0 };
 }
 
 /** Ablation switches: floor-aware stop, Eisenstat–Walker forcing, K + μ·M/h² regularisation. */
@@ -32,10 +35,22 @@ export interface RobustRecord {
   readonly updateInf: number;
   readonly stepInf: number;
   readonly retries: number;
+  readonly resolution: number;
+  readonly alphaMax: number;
+  readonly limitingVertex: number;
+  readonly minDistance: number;
 }
 
 export interface RobustGpu<A, K> extends NewtonGpu<A, K> {
   readonly regularization: A;
+}
+
+/** Line-search start of the colliders and the host-side f64 distance check (Experiment 5). */
+export interface ContactHooks {
+  /** α_max and its limiting vertex for the positions and direction currently on the GPU. */
+  readonly maxStep: () => Promise<{ readonly alpha: number; readonly vertex: number }>;
+  /** Smallest collider distance over the unknowns, in f64 from the f32 positions. */
+  readonly minDistance: (positions: Float32Array) => number;
 }
 
 export interface RobustContext<A, K> extends NewtonContext<A, K> {
@@ -44,6 +59,9 @@ export interface RobustContext<A, K> extends NewtonContext<A, K> {
   readonly settings: RobustSettings;
   readonly extras: RobustRecord[];
   readonly clock: PhaseClock;
+  readonly contact: ContactHooks | null;
+  /** Probes only: x_k and the scattered direction p_k of every update, for the oracle's α_max replay. */
+  readonly directions: Float32Array<ArrayBuffer>[] | null;
 }
 
 /** Newton state carried across the iterations of one time step. */
@@ -99,35 +117,60 @@ function stepInf(context: { readonly model: { readonly rowVertex: Uint32Array } 
     Math.max(largest, ...[0, 1, 2].map((d) => Math.abs(positions[3 * v + d] - origin[3 * v + d]))), 0);
 }
 
+/** Spacing of f32 numbers at max |x_i| over the unknowns: 2^(exponent − 23), from the f32 exponent bits. */
+function resolutionOf(context: { readonly model: { readonly rowVertex: Uint32Array } }, positions: Float32Array): number {
+  const largest = Array.from(context.model.rowVertex).reduce((m, v) => Math.max(m, ...[0, 1, 2].map((d) => Math.abs(positions[3 * v + d]))), 0);
+  const bits = new Uint32Array(Float32Array.of(largest).buffer)[0];
+  return 2 ** (((bits >>> 23) & 0xff) - 150);
+}
+
+/** The update rule: ‖αd‖∞ ≤ max(update_stop·‖x − x_n‖∞, resolution_factor·res(x)). */
+const updateIsSmall = (rules: RobustRules, extra: RobustRecord): boolean =>
+  extra.updateInf <= Math.max(rules.update_stop * extra.stepInf, rules.resolution_factor * extra.resolution);
+
 function forcingFor<A, K>(context: RobustContext<A, K>, state: StepState, norm: number, iteration: number): number {
   if (!context.settings.forcing) return context.model.pcg.tolerance;
   return iteration === 0 ? context.rules.eta_start : nextForcing(context.rules, state.eta, f32(norm / state.previousNorm));
 }
 
-const emptyExtra = (state: StepState): RobustRecord => ({ eta: Number.NaN, mu: state.mu, updateInf: Number.NaN, stepInf: Number.NaN, retries: 0 });
+const emptyExtra = (state: StepState): RobustRecord =>
+  ({ eta: Number.NaN, mu: state.mu, updateInf: Number.NaN, stepInf: Number.NaN, retries: 0, resolution: Number.NaN, alphaMax: Number.NaN, limitingVertex: Number.NaN, minDistance: Number.NaN });
+
+const NO_LIMIT = { alpha: 1, vertex: -1 } as const;
+
+/** Writes p_k and returns the line-search start: α_max of the colliders (timed as "ccd"), or 1 without colliders. */
+async function startStep<A, K>(context: RobustContext<A, K>, positions: Float32Array<ArrayBuffer>, direction: Float32Array): Promise<{ readonly alpha: number; readonly vertex: number }> {
+  const scattered = scatter(context.model, direction);
+  context.gpu.backend.write(context.gpu.direction, scattered);
+  context.directions?.push(Float32Array.from(positions), scattered);
+  const contact = context.contact;
+  return contact === null ? NO_LIMIT : inPhase(context.clock, "ccd", () => contact.maxStep());
+}
 
 /** Terminal record at `positions`: residual rule, iteration limit, regularisation cap or update rule. */
 async function finish<A, K>(context: RobustContext<A, K>, where: { readonly step: number; readonly iteration: number }, relative: number, status: StepStatus, state: StepState, positions: Float32Array<ArrayBuffer>): Promise<void> {
   pushRecord(context, terminal(where.step, where.iteration, relative, status), emptyExtra(state), positions);
 }
 
-/** One update: direction, line search, records; returns the accepted update's ‖αd‖∞, or null when the step ends. */
-async function update<A, K>(context: RobustContext<A, K>, positions: Float32Array<ArrayBuffer>, rhs: Float32Array, state: StepState, where: { readonly step: number; readonly iteration: number; readonly relative: number; readonly origin: Float32Array }): Promise<number | null> {
+/** One update: direction, line search, records; returns the accepted update's robust record, or null when the step ends. */
+async function update<A, K>(context: RobustContext<A, K>, positions: Float32Array<ArrayBuffer>, rhs: Float32Array, state: StepState, where: { readonly step: number; readonly iteration: number; readonly relative: number; readonly origin: Float32Array }): Promise<RobustRecord | null> {
   const solved = await solveDirection(context, positions, rhs, state);
   if (solved === null) {
     await finish(context, where, where.relative, STEP_STATUS.regularization_cap, state, positions);
     return null;
   }
   const direction = solved.run.solution;
-  context.gpu.backend.write(context.gpu.direction, scatter(context.model, direction));
-  const search = await inPhase(context.clock, "line_search", () => lineSearch(context, -dot32(rhs, direction)));
+  const limit = await startStep(context, positions, direction);
+  const search = await inPhase(context.clock, "line_search", () => lineSearch(context, -dot32(rhs, direction), limit.alpha));
   const updateInf = search === null ? Number.NaN : search.stepLength * infNorm(direction);
   const entry: IterationRecord = { step: where.step, iteration: where.iteration, relativeResidual: where.relative, pcgIterations: solved.run.iterations, pcgStatus: linearStatus(solved.run),
     linearResidual: solved.run.gpuTrueRelativeResidual, stepLength: search?.stepLength ?? Number.NaN, halvings: search?.halvings ?? Number.NaN, status: search === null ? STEP_STATUS.line_search_failed : STEP_STATUS.running };
   if (search !== null) advance(context.model, positions, direction, search.stepLength);
-  pushRecord(context, entry, { eta: state.eta, mu: state.mu, updateInf, stepInf: stepInf(context, positions, where.origin), retries: solved.retries }, positions);
+  const extra: RobustRecord = { eta: state.eta, mu: state.mu, updateInf, stepInf: stepInf(context, positions, where.origin), retries: solved.retries, resolution: resolutionOf(context, positions),
+    alphaMax: limit.alpha, limitingVertex: limit.vertex, minDistance: context.contact?.minDistance(positions) ?? Number.NaN };
+  pushRecord(context, entry, extra, positions);
   if (search !== null && context.settings.regularize) state.mu = search.halvings === 0 ? relaxMu(context.rules, state.mu) : state.mu;
-  return search === null ? null : updateInf;
+  return search === null ? null : extra;
 }
 
 /** Newton from `positions` (updated in place); `origin` is x_n, the state the time step started from. */
@@ -144,9 +187,9 @@ export async function solveStepRobust<A, K>(context: RobustContext<A, K>, positi
     }
     state.eta = forcingFor(context, state, norm, iteration);
     state.previousNorm = norm;
-    const updateInf = await update(context, positions, rhs, state, where);
-    if (updateInf === null) return;
-    if (context.settings.floorStop && updateInf <= context.rules.update_stop * stepInf(context, positions, origin)) {
+    const extra = await update(context, positions, rhs, state, where);
+    if (extra === null) return;
+    if (context.settings.floorStop && updateIsSmall(context.rules, extra)) {
       return finishByUpdate(context, { step, iteration: iteration + 1 }, scale, state, positions);
     }
   }

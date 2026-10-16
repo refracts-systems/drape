@@ -1,4 +1,5 @@
-// Per unknown row: (M/h²)((x − x̂)·αd + ½|αd|²), the exact inertia change, written after the hinge entries of elem_delta.
+// Per unknown row: (M/h²)((x − x̂)·αd + ½|αd|²), the exact inertia change, plus the barrier change b(d(x + αd)) − b(d(x))
+// of every collider (contact.wgsl; none before Experiment 5), written after the hinge entries of elem_delta.
 override DELTA_OFFSET: u32 = 0u;
 
 @group(0) @binding(0) var<storage, read> positions: array<f32>;
@@ -8,6 +9,7 @@ override DELTA_OFFSET: u32 = 0u;
 @group(0) @binding(4) var<storage, read> row_mass: array<f32>;
 @group(0) @binding(5) var<storage, read> step: array<f32>;
 @group(0) @binding(6) var<storage, read_write> elem_delta: array<f32>;
+@group(0) @binding(7) var<storage, read> colliders: array<f32>;
 
 @compute @workgroup_size(256)
 fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
@@ -16,7 +18,13 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     return;
   }
   let v = row_vertex[row];
-  let offset = vec3f(positions[3u * v], positions[3u * v + 1u], positions[3u * v + 2u]) - vec3f(x_hat[3u * v], x_hat[3u * v + 1u], x_hat[3u * v + 2u]);
+  let x = vec3f(positions[3u * v], positions[3u * v + 1u], positions[3u * v + 2u]);
+  let offset = x - vec3f(x_hat[3u * v], x_hat[3u * v + 1u], x_hat[3u * v + 2u]);
   let moved = vec3f(direction[3u * v], direction[3u * v + 1u], direction[3u * v + 2u]) * step[0];
-  elem_delta[DELTA_OFFSET + row] = row_mass[row] * (dot(offset, moved) + 0.5 * dot(moved, moved));
+  let inertia = row_mass[row] * (dot(offset, moved) + 0.5 * dot(moved, moved));
+  if (collider_count() == 0u) {
+    elem_delta[DELTA_OFFSET + row] = inertia;
+    return;
+  }
+  elem_delta[DELTA_OFFSET + row] = inertia + (contact_energy(x + moved) - contact_energy(x));
 }

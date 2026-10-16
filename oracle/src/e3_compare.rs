@@ -53,17 +53,17 @@ fn round_f32(x: &[Vec3]) -> Vec<Vec3> {
 }
 
 /// The f64 trajectory written by e3-generate.
-struct Reference {
-    positions: Vec<Vec<Vec3>>,
-    iterations: Vec<f64>,
-    final_residual: Vec<f64>,
-    converged: Vec<f64>,
-    residual_offsets: Vec<f64>,
-    residuals: Vec<f64>,
+pub struct Reference {
+    pub positions: Vec<Vec<Vec3>>,
+    pub iterations: Vec<f64>,
+    pub final_residual: Vec<f64>,
+    pub converged: Vec<f64>,
+    pub residual_offsets: Vec<f64>,
+    pub residuals: Vec<f64>,
 }
 
 impl Reference {
-    fn load(dir: &Path, vertices: usize) -> Result<Reference, String> {
+    pub fn load(dir: &Path, vertices: usize) -> Result<Reference, String> {
         let manifest = fs::read_to_string(dir.join("reference.json")).map_err(|e| format!("reference.json: {e}"))?;
         let bytes = fs::read(dir.join("reference.bin")).map_err(|e| e.to_string())?;
         let array = |name: &str| locate(&manifest, name).map(|(offset, length)| read_f64(&bytes, offset, length));
@@ -75,7 +75,7 @@ impl Reference {
         })
     }
 
-    fn residual_history(&self, step: usize) -> &[f64] {
+    pub fn residual_history(&self, step: usize) -> &[f64] {
         &self.residuals[self.residual_offsets[step - 1] as usize..self.residual_offsets[step] as usize]
     }
 
@@ -184,8 +184,8 @@ fn probes(drape: &Drape, reference: &Reference, dir: &Path) -> Result<Vec<Probe>
 
 /// Per-step f32 Newton results of the GPU trajectory.
 struct StepRecords {
-    iterations: Vec<f64>,
-    final_residual: Vec<f64>,
+    pub iterations: Vec<f64>,
+    pub final_residual: Vec<f64>,
     converged: Vec<bool>,
     pcg_per_solve: f64,
     worst_linear_residual: f64,
@@ -217,7 +217,7 @@ struct Run {
 
 fn load_run(problem_dir: &Path, gpu_dir: &Path) -> Result<Run, String> {
     let problem = fs::read_to_string(problem_dir.join("problem.json")).map_err(|e| format!("problem.json: {e}"))?;
-    let drape = Drape::build(number(&problem, "", "grid_columns") as usize, TANGENT);
+    let drape = Drape::from_problem(&problem, TANGENT);
     let gpu = fs::read_to_string(gpu_dir.join("gpu-result.json")).map_err(|e| format!("gpu-result.json: {e}"))?;
     let trajectory = to_states(&read_f32_file(&gpu_dir.join("gpu-trajectory.bin"))?, drape.mesh.rest.len());
     let records = step_records(&read_records(&gpu_dir.join("gpu-iterations.bin"))?, trajectory.len() - 1);
@@ -335,7 +335,7 @@ pub struct ProbeSummary {
 
 pub fn probe_summaries(problem_dir: &Path, gpu_dir: &Path) -> Result<Vec<ProbeSummary>, String> {
     let problem = fs::read_to_string(problem_dir.join("problem.json")).map_err(|e| e.to_string())?;
-    let drape = Drape::build(number(&problem, "", "grid_columns") as usize, TANGENT);
+    let drape = Drape::from_problem(&problem, TANGENT);
     let reference = Reference::load(problem_dir, drape.mesh.rest.len())?;
     Ok(probes(&drape, &reference, gpu_dir)?.into_iter()
         .map(|p| ProbeSummary { step: p.step, error: p.error, f32_floor: p.f32_floor(), representation_floor: p.representation_floor })

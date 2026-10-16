@@ -59,7 +59,8 @@ pub fn run(dir: &Path, out: &Path) -> Result<(), String> {
     results.iter().for_each(|text| print_row(text));
     let scaling: Vec<Json> = RUNGS.iter().flat_map(|r| growth(&results, r)).collect();
     scaling.iter().for_each(|g| println!("scaling {}", g.render()));
-    let passing: Vec<&str> = RUNGS.iter().copied().filter(|r| results.iter().filter(|t| string(t, "", "rung") == *r).all(|t| accuracy_ok(t))).collect();
+    let ran = |r: &str| results.iter().any(|t| string(t, "", "rung") == r);
+    let passing: Vec<&str> = RUNGS.iter().copied().filter(|r| ran(r) && results.iter().filter(|t| string(t, "", "rung") == *r).all(|t| accuracy_ok(t))).collect();
     let final_rung = passing.last().copied().unwrap_or("none");
     println!("final configuration: rung {final_rung}");
     let rendered: Vec<String> = scaling.iter().map(Json::render).collect();
