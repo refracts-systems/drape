@@ -10,6 +10,10 @@ export const KERNEL_FILES = {
   membrane_energy_change: { file: "membrane_energy_change.wgsl", header: "membrane.wgsl" },
   assemble_matrix: { file: "assemble_matrix.wgsl", header: null },
   assemble_force: { file: "assemble_force.wgsl", header: null },
+  hinge_element: { file: "hinge_element.wgsl", header: "hinge.wgsl" },
+  hinge_energy_change: { file: "hinge_energy_change.wgsl", header: "hinge.wgsl" },
+  inertia: { file: "inertia.wgsl", header: null },
+  inertia_energy_change: { file: "inertia_energy_change.wgsl", header: null },
 } as const;
 
 export type KernelName = keyof typeof KERNEL_FILES;
@@ -17,7 +21,7 @@ export type KernelSources = Readonly<Record<KernelName, string>>;
 
 const KERNEL_NAMES = Object.keys(KERNEL_FILES) as readonly KernelName[];
 
-/** Reads every kernel through `readText` and prepends its shared header (State struct or membrane law). */
+/** Reads every kernel through `readText` and prepends its shared header (State struct, membrane law or hinge angle). */
 export async function assembleKernels(readText: (file: string) => Promise<string>): Promise<KernelSources> {
   const entries = await Promise.all(KERNEL_NAMES.map(async (name) => {
     const { file, header } = KERNEL_FILES[name];

@@ -4,10 +4,16 @@ mod cases;
 mod compare;
 mod coupon;
 mod criteria;
+mod drape;
+mod dual;
 mod e2_checks;
 mod e2_compare;
 mod e2_generate;
 mod e2_summarize;
+mod e3_checks;
+mod e3_compare;
+mod e3_generate;
+mod e3_summarize;
 mod generate;
 mod hinge;
 mod io;
@@ -35,7 +41,10 @@ const USAGE: &str = "usage:
   oracle summarize --dir <cases dir> --out <summary.json>
   oracle e2-generate --path <uniaxial|biaxial|patch> --n <grid columns> --out <dir>
   oracle e2-compare --dir <coupon dir>
-  oracle e2-summarize --dir <coupons dir> --out <summary.json>";
+  oracle e2-summarize --dir <coupons dir> --out <summary.json>
+  oracle e3-generate --n <grid columns> --out <dir> [--reference true|false]
+  oracle e3-compare --dir <drape dir>
+  oracle e3-summarize --dir <drapes dir> --out <summary.json>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -58,6 +67,9 @@ fn dispatch(args: &[String]) -> Result<(), String> {
         "e2-generate" => e2_generate::run(coupon::LoadPath::parse(required(&flags, "path")?)?, number(&flags, "n", "33")?, &PathBuf::from(required(&flags, "out")?)),
         "e2-compare" => e2_compare::run(&PathBuf::from(required(&flags, "dir")?)),
         "e2-summarize" => e2_summarize::run(&PathBuf::from(required(&flags, "dir")?), &PathBuf::from(required(&flags, "out")?)),
+        "e3-generate" => e3_generate::run(number(&flags, "n", "33")?, number(&flags, "reference", "true")?, &PathBuf::from(required(&flags, "out")?)),
+        "e3-compare" => e3_compare::run(&PathBuf::from(required(&flags, "dir")?)),
+        "e3-summarize" => e3_summarize::run(&PathBuf::from(required(&flags, "dir")?), &PathBuf::from(required(&flags, "out")?)),
         other => Err(format!("unknown command '{other}'")),
     }
 }

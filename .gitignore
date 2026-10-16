@@ -3,3 +3,4 @@ gpu/node_modules/
 cases/*/*.bin
 cases-baseline/*/*.bin
 coupon/*/*.bin
+drape/*/*.bin

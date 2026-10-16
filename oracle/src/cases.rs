@@ -91,7 +91,7 @@ fn deformed_positions(mesh: &Mesh, (wale, course): (f64, f64)) -> Vec<Vec3> {
     mesh.rest.iter().map(|p| [wale * p[0], course * p[1], 0.0]).collect()
 }
 
-fn hinge_elements(mesh: &Mesh, material: &Material) -> Vec<HingeElement> {
+pub fn hinge_elements(mesh: &Mesh, material: &Material) -> Vec<HingeElement> {
     mesh.hinges
         .iter()
         .map(|&vertices| {

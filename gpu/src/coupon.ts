@@ -51,7 +51,7 @@ export interface CouponProblem {
   readonly u32: Readonly<Record<U32ArrayName, Uint32Array<ArrayBuffer>>>;
 }
 
-function numbers<K extends string>(source: unknown, keys: readonly K[], label: string): Record<K, number> {
+export function numbers<K extends string>(source: unknown, keys: readonly K[], label: string): Record<K, number> {
   if (!isObject(source)) throw new Error(`problem.json: '${label}' is not an object`);
   return Object.fromEntries(keys.map((key) => [key, field(source, key, isNumber)])) as Record<K, number>;
 }

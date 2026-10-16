@@ -1,4 +1,5 @@
-use crate::linalg::{cross, dot, norm, outer, scale, sub, Mat3, Vec3};
+use crate::dual::{add3, cross3, dot3, scale3, sub3, Dual, Scalar, V3};
+use crate::linalg::{add, cross, dot, norm, outer, scale, sub, Mat3, Vec3};
 
 /// Discrete hinge with vertices [left opposite x1, right opposite x2, edge start x3, edge end x4].
 /// Energy = stiffness * theta^2, rest angle zero (panels are cut flat).
@@ -60,6 +61,50 @@ impl HingeElement {
     }
 }
 
+impl HingeElement {
+    /// Exact Hessian of θ: each column is the forward-mode derivative of `angle_gradient_of` along one coordinate.
+    pub fn angle_hessian(&self, x: &[Vec3]) -> [[Mat3; 4]; 4] {
+        let points = self.vertices.map(|v| x[v]);
+        let mut blocks = [[[[0.0; 3]; 3]; 4]; 4];
+        for (l, c) in (0..4).flat_map(|l| (0..3).map(move |c| (l, c))) {
+            let seeded: [V3<Dual>; 4] = std::array::from_fn(|k| std::array::from_fn(|d| Dual { v: points[k][d], t: f64::from(u8::from(k == l && d == c)) }));
+            let column = angle_gradient_of(seeded);
+            (0..4).for_each(|k| (0..3).for_each(|r| blocks[k][l][r][c] = column[k][r].t));
+        }
+        blocks
+    }
+
+    /// Exact energy Hessian 2k(∇θ∇θᵀ + θ∇²θ), the tangent Newton needs away from the flat state.
+    pub fn tangent(&self, x: &[Vec3]) -> [[Mat3; 4]; 4] {
+        let (theta, g, h) = (self.angle(x), self.angle_gradient(x), self.angle_hessian(x));
+        let factor = 2.0 * self.stiffness;
+        std::array::from_fn(|k| std::array::from_fn(|l| std::array::from_fn(|r| std::array::from_fn(|c| factor * (g[k][r] * g[l][c] + theta * h[k][l][r][c])))))
+    }
+
+    /// k(θ' − θ)(θ' + θ) for x → x + αd: one hinge's energy change, never a difference of global energies.
+    pub fn energy_change(&self, x: &[Vec3], d: &[Vec3], alpha: f64) -> f64 {
+        let moved: Vec<Vec3> = self.vertices.iter().map(|&v| add(x[v], scale(d[v], alpha))).collect();
+        let local = HingeElement { vertices: [0, 1, 2, 3], stiffness: self.stiffness };
+        let (before, after) = (self.angle(x), local.angle(&moved));
+        self.stiffness * (after - before) * (after + before)
+    }
+}
+
+/// `angle_gradient` written once for any scalar (f64 or Dual), same operation order.
+pub fn angle_gradient_of<T: Scalar>(p: [V3<T>; 4]) -> [V3<T>; 4] {
+    let [x1, x2, x3, x4] = p;
+    let edge = sub3(x4, x3);
+    let length = dot3(edge, edge).sqrt();
+    let n1 = cross3(sub3(x1, x3), sub3(x1, x4));
+    let n2 = cross3(sub3(x2, x4), sub3(x2, x3));
+    let (a1, a2) = (scale3(n1, T::constant(1.0) / dot3(n1, n1)), scale3(n2, T::constant(1.0) / dot3(n2, n2)));
+    let u1 = scale3(a1, length);
+    let u2 = scale3(a2, length);
+    let u3 = add3(scale3(a1, dot3(sub3(x1, x4), edge) / length), scale3(a2, dot3(sub3(x2, x4), edge) / length));
+    let u4 = add3(scale3(a1, -dot3(sub3(x1, x3), edge) / length), scale3(a2, -dot3(sub3(x2, x3), edge) / length));
+    [u1, u2, u3, u4].map(|u| scale3(u, T::constant(-1.0)))
+}
+
 fn add_pair(a: Vec3, sa: f64, b: Vec3, sb: f64) -> Vec3 {
     let (p, q) = (scale(a, sa), scale(b, sb));
     [p[0] + q[0], p[1] + q[1], p[2] + q[2]]
@@ -100,6 +145,48 @@ mod tests {
                 assert!((fd - g[v][d]).abs() < 1e-6, "v{v} d{d}: fd {fd} analytic {}", g[v][d]);
             }
         }
+    }
+
+    #[test]
+    fn generic_angle_gradient_matches_the_f64_one() {
+        let (hinge, x) = bent_hinge(0.4);
+        let generic = angle_gradient_of(hinge.vertices.map(|v| x[v]));
+        assert_eq!(generic, hinge.angle_gradient(&x));
+    }
+
+    #[test]
+    fn exact_tangent_matches_gradient_finite_difference_when_bent() {
+        let (hinge, x) = bent_hinge(0.4);
+        let tangent = hinge.tangent(&x);
+        for l in 0..4 {
+            for d in 0..3 {
+                let fd = gradient_derivative4(&x, l, d, 1e-7, |y| hinge.gradient(y));
+                for k in 0..4 {
+                    for r in 0..3 {
+                        let exact = tangent[k][l][r][d];
+                        assert!((fd[k][r] - exact).abs() < 1e-6 * (1.0 + exact.abs()), "k{k} l{l} r{r} d{d}: fd {} exact {exact}", fd[k][r]);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn angle_hessian_is_symmetric() {
+        let (hinge, x) = bent_hinge(0.3);
+        let h = hinge.angle_hessian(&x);
+        for (k, l, r, c) in (0..4).flat_map(|k| (0..4).flat_map(move |l| (0..3).flat_map(move |r| (0..3).map(move |c| (k, l, r, c))))) {
+            assert!((h[k][l][r][c] - h[l][k][c][r]).abs() < 1e-10, "k{k} l{l} r{r} c{c}");
+        }
+    }
+
+    #[test]
+    fn energy_change_equals_energy_difference() {
+        let (hinge, x) = bent_hinge(0.4);
+        let d = vec![[0.01, -0.02, 0.03], [0.0, 0.01, -0.02], [0.005, 0.0, 0.01], [-0.01, 0.02, 0.0]];
+        let moved: Vec<Vec3> = x.iter().zip(&d).map(|(p, q)| add(*p, scale(*q, 0.6))).collect();
+        let direct = hinge.energy(&moved) - hinge.energy(&x);
+        assert!((hinge.energy_change(&x, &d, 0.6) - direct).abs() < 1e-14, "{direct}");
     }
 
     #[test]

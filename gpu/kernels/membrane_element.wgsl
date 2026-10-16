@@ -1,4 +1,8 @@
-// Per element: F, Green strain, stress, nodal gradient ∂W/∂x (3 × vec3) and exact tangent (3 × 3 blocks of 3 × 3).
+// Per element: F, Green strain, stress, nodal gradient ∂W/∂x (3 × vec3) and tangent (3 × 3 blocks of 3 × 3).
+// PROJECTED = false: exact tangent. PROJECTED = true: negative principal stress clamped in the geometric term
+// (oracle MembraneElement::hessian), the E3 evidence-triggered tangent.
+override PROJECTED: bool = false;
+
 @group(0) @binding(0) var<storage, read> positions: array<f32>;
 @group(0) @binding(1) var<storage, read> elem_vertices: array<u32>;
 @group(0) @binding(2) var<storage, read> elem_geom: array<f32>;
@@ -22,11 +26,12 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
   let x0 = position(elem_vertices[3u * e]);
   let f = columns_of(position(elem_vertices[3u * e + 1u]) - x0, position(elem_vertices[3u * e + 2u]) - x0, shape_gradient(e, 1u), shape_gradient(e, 2u));
   let stress = stress_of(green_strain(f));
+  let geometric_stress = select(stress, clamp_negative_stress(stress), PROJECTED);
   let area = elem_geom[7u * e + 6u];
   for (var k = 0u; k < 3u; k = k + 1u) {
     write_gradient(e, k, f, stress, area);
     for (var l = 0u; l < 3u; l = l + 1u) {
-      write_block(e, k, l, f, stress, area);
+      write_block(e, k, l, f, geometric_stress, area);
     }
   }
 }
@@ -69,4 +74,30 @@ fn write_block(e: u32, k: u32, l: u32, f: Columns, s: vec3f, area: f32) {
       elem_hess[o + 3u * r + c] = value * area;
     }
   }
+}
+
+// Positive part of the 2×2 stress (S_ww, S_cc, S_wc), as oracle membrane::clamp_negative_stress.
+fn clamp_negative_stress(s: vec3f) -> vec3f {
+  let mean = 0.5 * (s.x + s.y);
+  let radius = sqrt(0.25 * (s.x - s.y) * (s.x - s.y) + s.z * s.z);
+  let high = mean + radius;
+  if (mean - radius >= 0.0) {
+    return s;
+  }
+  if (high <= 0.0) {
+    return vec3f(0.0);
+  }
+  let v = principal_direction(s, high);
+  return vec3f(high * v.x * v.x, high * v.y * v.y, high * v.x * v.y);
+}
+
+fn principal_direction(s: vec3f, eigenvalue: f32) -> vec2f {
+  let first = vec2f(s.z, eigenvalue - s.x);
+  let second = vec2f(eigenvalue - s.y, s.z);
+  let pick = select(second, first, length(first) >= length(second));
+  let size = length(pick);
+  if (size == 0.0) {
+    return select(vec2f(0.0, 1.0), vec2f(1.0, 0.0), s.x >= s.y);
+  }
+  return pick / size;
 }

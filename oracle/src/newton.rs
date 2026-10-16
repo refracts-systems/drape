@@ -1,6 +1,35 @@
 use crate::band::BandCholesky;
+use crate::bsr::Bsr;
 use crate::coupon::{free_dot, Coupon};
 use crate::linalg::{vector_norm, Vec3};
+
+/// What Newton needs from a discretised energy: residual and tangent on the unknowns, a cancellation-free
+/// energy change, and the map between unknown rows and vertices.
+pub trait NewtonSystem {
+    fn residual(&self, x: &[Vec3]) -> Vec<f64>;
+    fn tangent(&self, x: &[Vec3]) -> Bsr;
+    fn energy_change(&self, x: &[Vec3], d: &[Vec3], alpha: f64) -> f64;
+    fn scatter(&self, rows: &[f64]) -> Vec<Vec3>;
+    fn gather(&self, vertices: &[Vec3]) -> Vec<f64>;
+}
+
+impl NewtonSystem for Coupon {
+    fn residual(&self, x: &[Vec3]) -> Vec<f64> {
+        self.free_gradient(x)
+    }
+    fn tangent(&self, x: &[Vec3]) -> Bsr {
+        Coupon::tangent(self, x)
+    }
+    fn energy_change(&self, x: &[Vec3], d: &[Vec3], alpha: f64) -> f64 {
+        Coupon::energy_change(self, x, d, alpha)
+    }
+    fn scatter(&self, rows: &[f64]) -> Vec<Vec3> {
+        Coupon::scatter(self, rows)
+    }
+    fn gather(&self, vertices: &[Vec3]) -> Vec<f64> {
+        self.free.iter().flat_map(|&v| vertices[v]).collect()
+    }
+}
 
 pub struct NewtonSettings {
     pub tolerance: f64,
@@ -32,7 +61,7 @@ impl StepStatus {
     }
 }
 
-/// One load step: ‖g(x_k)‖ / step scale for every iterate, and the line search behind each update.
+/// One load or time step: ‖g(x_k)‖ / step scale for every iterate, and the line search behind each update.
 pub struct StepSolution {
     pub positions: Vec<Vec3>,
     pub residuals: Vec<f64>,
@@ -41,10 +70,10 @@ pub struct StepSolution {
 }
 
 /// Newton with an exact f64 band-Cholesky step and Armijo backtracking on the energy.
-pub fn solve_step(coupon: &Coupon, start: Vec<Vec3>, scale: f64, settings: &NewtonSettings) -> Result<StepSolution, String> {
+pub fn solve_step<S: NewtonSystem>(system: &S, start: Vec<Vec3>, scale: f64, settings: &NewtonSettings) -> Result<StepSolution, String> {
     let mut step = StepSolution { positions: start, residuals: Vec::new(), searches: Vec::new(), status: StepStatus::IterationLimit };
     loop {
-        let gradient = coupon.free_gradient(&step.positions);
+        let gradient = system.residual(&step.positions);
         let relative = vector_norm(&gradient) / scale;
         step.residuals.push(relative);
         if relative <= settings.tolerance {
@@ -54,8 +83,8 @@ pub fn solve_step(coupon: &Coupon, start: Vec<Vec3>, scale: f64, settings: &Newt
         if step.searches.len() == settings.max_iterations {
             return Ok(step);
         }
-        let direction = newton_direction(coupon, &step.positions, &gradient)?;
-        let Some(search) = line_search(coupon, &step.positions, &gradient, &direction, settings) else {
+        let direction = newton_direction(system, &step.positions, &gradient)?;
+        let Some(search) = line_search(system, &step.positions, &gradient, &direction, settings) else {
             step.status = StepStatus::LineSearchFailed;
             return Ok(step);
         };
@@ -64,22 +93,21 @@ pub fn solve_step(coupon: &Coupon, start: Vec<Vec3>, scale: f64, settings: &Newt
     }
 }
 
-fn newton_direction(coupon: &Coupon, x: &[Vec3], gradient: &[f64]) -> Result<Vec<Vec3>, String> {
+fn newton_direction<S: NewtonSystem>(system: &S, x: &[Vec3], gradient: &[f64]) -> Result<Vec<Vec3>, String> {
     let negative: Vec<f64> = gradient.iter().map(|g| -g).collect();
-    let rows = BandCholesky::factor(&coupon.tangent(x))?.solve(&negative);
-    Ok(coupon.scatter(&rows))
+    let rows = BandCholesky::factor(&system.tangent(x))?.solve(&negative);
+    Ok(system.scatter(&rows))
 }
 
 /// Backtracking from α = 1: accept when ΔΠ ≤ c·α·gᵀd. None when d is not a descent direction or halving runs out.
-pub fn line_search(coupon: &Coupon, x: &[Vec3], gradient: &[f64], direction: &[Vec3], settings: &NewtonSettings) -> Option<LineSearch> {
-    let rows: Vec<f64> = coupon.free.iter().flat_map(|&v| direction[v]).collect();
-    let slope = free_dot(gradient, &rows);
+pub fn line_search<S: NewtonSystem>(system: &S, x: &[Vec3], gradient: &[f64], direction: &[Vec3], settings: &NewtonSettings) -> Option<LineSearch> {
+    let slope = free_dot(gradient, &system.gather(direction));
     if slope >= 0.0 {
         return None;
     }
     (0..=settings.max_halvings)
         .map(|halvings| LineSearch { step_length: 0.5f64.powi(halvings as i32), halvings })
-        .find(|s| coupon.energy_change(x, direction, s.step_length) <= settings.armijo * s.step_length * slope)
+        .find(|s| system.energy_change(x, direction, s.step_length) <= settings.armijo * s.step_length * slope)
 }
 
 fn advance(x: &mut [Vec3], direction: &[Vec3], step_length: f64) {
