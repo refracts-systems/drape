@@ -1,6 +1,6 @@
-# Seri Belajar: Jersey Engine, dari Nol sampai Step 4
+# Seri Belajar: Jersey Engine, dari Nol sampai Step 5
 
-Seri ini menjelaskan **setiap file** yang dikerjakan di Step 1 (Experiment 1), Step 2 (Experiment 2), Step 3 (Experiment 3), dan Step 4 (Experiment 4) proyek `jersey-engine`.
+Seri ini menjelaskan **setiap file** yang dikerjakan di Step 1 (Experiment 1), Step 2 (Experiment 2), Step 3 (Experiment 3), Step 4 (Experiment 4), dan Step 5 (Experiment 5) proyek `jersey-engine`.
 Penulisnya mengasumsikan kamu adalah **backend developer**: paham bahasa pemrograman, API, thread, antrean job, database, dan JSON, tetapi
 **belum pernah menulis kode GPU (WGSL / WebGPU)** dan tidak berlatar belakang komputasi numerik atau mekanika.
 
@@ -27,11 +27,14 @@ jersey-engine/
 ├── coupon/        data uji Step 2 (kupon kain, langkah beban, hasil GPU)
 ├── drape/         data uji Step 3 (kain jatuh, lintasan, probe, hasil GPU)
 ├── drape4/        data uji Step 4 (referensi teregularisasi, hasil per rung ablation)
+├── drape4-final/  data uji Step 5 Part 0 (E4-final, rung D)
+├── drape5/        data uji Step 5 Part 1 (kain jatuh ke bola di atas lantai)
 ├── results/       ringkasan hasil per eksperimen + keputusan (verdict)
 ├── run-e1.sh      menjalankan Step 1 dari ujung ke ujung
 ├── run-e2.sh      menjalankan Step 2 dari ujung ke ujung
 ├── run-e3.sh      menjalankan Step 3 dari ujung ke ujung
-└── run-e4.sh      menjalankan Step 4 (ablation A–D) dari ujung ke ujung
+├── run-e4.sh      menjalankan Step 4 (ablation A–D) dari ujung ke ujung
+└── run-e5.sh      menjalankan Step 5 (E4-final + kontak) dari ujung ke ujung
 ```
 
 ## Daftar isi
@@ -132,6 +135,23 @@ jersey-engine/
 | 4.9 | [e4_compare.rs, e4_summarize.rs](step_4/step_4_9_e4_compare_rs_e4_summarize_rs.md) | Replay aturan, gate, rung final |
 | 4.10 | [run-e4.sh dan hasil](step_4/step_4_10_run_e4_sh_dan_hasil.md) | Tabel ablation, gate per rung, kesimpulan |
 
+### Step 5: Menutup E4, lalu kontak tanpa gesekan (Experiment 5)
+
+| No | File | Isi |
+|---|---|---|
+| 5.0 | [gambaran besar](step_5/step_5_0_gambaran_besar.md) | Part 0 (E4-final), Part 1 (bola + lantai), hasil singkat |
+| 5.1 | [newton.rs](step_5/step_5_1_newton_rs.md) | Trace per iterasi, konvergensi di lantai f64, awal line search |
+| 5.2 | [e4_rules.rs](step_5/step_5_2_e4_rules_rs.md) | Aturan update dengan resolusi f32 |
+| 5.3 | [e4_diagnose.rs](step_5/step_5_3_e4_diagnose_rs.md) | Membedah langkah 89 dan lantai f64 |
+| 5.4 | [contact.rs](step_5/step_5_4_contact_rs.md) | Collider analitik, barrier IPC, α_max |
+| 5.5 | [drape.rs](step_5/step_5_5_drape_rs.md) | Scene, barrier di Φ, titik awal Newton yang aman |
+| 5.6 | [e3_generate.rs, e5_checks.rs](step_5/step_5_6_e3_generate_rs_e5_checks_rs.md) | Skema, probe berbasis kejadian, cek turunan kontak |
+| 5.7 | [e4_compare.rs, e5_compare.rs, e5_summarize.rs](step_5/step_5_7_e4_compare_e5_compare_e5_summarize_rs.md) | Menilai kontak, toleransi berbasis kondisi |
+| 5.8 | [contact.wgsl, inertia.wgsl, inertia_energy_change.wgsl](step_5/step_5_8_contact_wgsl_inertia_wgsl.md) | Barrier di GPU, ln yang teliti |
+| 5.9 | [ccd.wgsl](step_5/step_5_9_ccd_wgsl.md) | Batas langkah line search di GPU |
+| 5.10 | [robust-newton.ts, contact-host.ts, drape-e4.ts](step_5/step_5_10_robust_newton_ts_contact_host_ts_drape_e4_ts.md) | Newton host dengan kontak |
+| 5.11 | [run-e5.ts, run-e5.sh dan hasil](step_5/step_5_11_run_e5_ts_run_e5_sh_dan_hasil.md) | Semua angka, gate, trigger, regresi |
+
 ## Glosarium cepat
 
 | Istilah | Arti singkat | Analogi backend |
@@ -150,3 +170,5 @@ jersey-engine/
 | Residual | Seberapa jauh jawaban dari memenuhi persamaan | "Selisih saldo" setelah rekonsiliasi |
 | Konvergen | Iterasi berhenti karena residual sudah cukup kecil | Retry loop yang berhasil |
 | Gate | Syarat lulus/gagal yang ditetapkan sebelum mengukur | SLO / acceptance criteria |
+| Barrier | Energi yang naik tanpa batas saat mendekati permukaan | Back-pressure yang makin keras saat antrean hampir penuh |
+| CCD | Batas langkah supaya titik tidak melompati permukaan | Rate limiter yang menjamin tidak ada lompatan melewati batas |
