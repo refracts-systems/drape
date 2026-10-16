@@ -1,6 +1,6 @@
-# Seri Belajar: Jersey Engine, dari Nol sampai Step 2
+# Seri Belajar: Jersey Engine, dari Nol sampai Step 3
 
-Seri ini menjelaskan **setiap file** yang dikerjakan di Step 1 (Experiment 1) dan Step 2 (Experiment 2) proyek `jersey-engine`.
+Seri ini menjelaskan **setiap file** yang dikerjakan di Step 1 (Experiment 1), Step 2 (Experiment 2), dan Step 3 (Experiment 3) proyek `jersey-engine`.
 Penulisnya mengasumsikan kamu adalah **backend developer**: paham bahasa pemrograman, API, thread, antrean job, database, dan JSON, tetapi
 **belum pernah menulis kode GPU (WGSL / WebGPU)** dan tidak berlatar belakang komputasi numerik atau mekanika.
 
@@ -12,7 +12,8 @@ dan setiap istilah baru dijelaskan dengan analogi dunia backend.
 1. Mulai dari `step_1/step_1_0_gambaran_besar.md`: masalah apa yang ingin dipecahkan, dan kenapa ada GPU, f32, f64, dan "oracle".
 2. Baca berurutan. Urutannya mengikuti **alur data**, bukan urutan abjad file:
    masalah dibuat (Rust) → dikirim ke GPU (TypeScript) → dihitung (WGSL) → dibandingkan kembali (Rust) → diputuskan lulus/gagal.
-3. Step 2 dibangun di atas Step 1. Jangan lompat ke Step 2 sebelum paham `solver.ts` dan kernel PCG di Step 1.
+3. Step 2 dibangun di atas Step 1, dan Step 3 di atas keduanya. Jangan lompat ke Step 2 sebelum paham `solver.ts` dan kernel PCG di Step 1,
+   dan jangan ke Step 3 sebelum paham Newton dan perakitan gather di Step 2.
 
 ## Peta besar proyek
 
@@ -24,9 +25,11 @@ jersey-engine/
 │   └── src/       kode host: menyiapkan buffer, mengirim kerja ke GPU, membaca hasil
 ├── cases/         data uji Step 1 (matriks, solusi referensi, hasil GPU)
 ├── coupon/        data uji Step 2 (kupon kain, langkah beban, hasil GPU)
+├── drape/         data uji Step 3 (kain jatuh, lintasan, probe, hasil GPU)
 ├── results/       ringkasan hasil per eksperimen + keputusan (verdict)
 ├── run-e1.sh      menjalankan Step 1 dari ujung ke ujung
-└── run-e2.sh      menjalankan Step 2 dari ujung ke ujung
+├── run-e2.sh      menjalankan Step 2 dari ujung ke ujung
+└── run-e3.sh      menjalankan Step 3 dari ujung ke ujung
 ```
 
 ## Daftar isi
@@ -85,6 +88,31 @@ jersey-engine/
 | 2.15 | [run-e2.ts](step_2/step_2_15_run_e2_ts.md) | Runner Step 2 dan format output biner |
 | 2.16 | [e2_compare.rs, e2_summarize.rs](step_2/step_2_16_e2_compare_rs_e2_summarize_rs.md) | Menilai Newton f32 terhadap f64 |
 | 2.17 | [run-e2.sh dan hasil](step_2/step_2_17_run_e2_sh_dan_hasil.md) | Hasil, lantai f32, dan artinya |
+
+### Step 3: Kain dinamis 3D dengan tekukan (Experiment 3)
+
+| No | File | Isi |
+|---|---|---|
+| 3.0 | [gambaran besar](step_3/step_3_0_gambaran_besar.md) | Backward Euler, hinge, probe satu langkah, trigger |
+| 3.1 | [dual.rs](step_3/step_3_1_dual_rs.md) | Bilangan dual: turunan eksak otomatis |
+| 3.2 | [hinge.rs](step_3/step_3_2_hinge_rs.md) | Sudut lipatan, Hessian eksak, perubahan energi hinge |
+| 3.3 | [newton.rs](step_3/step_3_3_newton_rs.md) | Newton generik lewat trait `NewtonSystem` |
+| 3.4 | [drape.rs](step_3/step_3_4_drape_rs.md) | Kain jatuh, potensial inkremental Φ, trigger tangen |
+| 3.5 | [e3_checks.rs](step_3/step_3_5_e3_checks_rs.md) | Cek FD untuk Φ, riwayat energi |
+| 3.6 | [e3_generate.rs](step_3/step_3_6_e3_generate_rs.md) | File soal, lintasan referensi, peta gather gabungan |
+| 3.7 | [hinge.wgsl](step_3/step_3_7_hinge_wgsl.md) | Dual di WGSL, bug akurasi `atan2` |
+| 3.8 | [hinge_element.wgsl](step_3/step_3_8_hinge_element_wgsl.md) | Gradien + Hessian hinge per thread |
+| 3.9 | [hinge_energy_change.wgsl](step_3/step_3_9_hinge_energy_change_wgsl.md) | Perubahan energi hinge |
+| 3.10 | [inertia.wgsl, inertia_energy_change.wgsl](step_3/step_3_10_inertia_wgsl_inertia_energy_change_wgsl.md) | Suku inersia backward Euler |
+| 3.11 | [membrane_element.wgsl](step_3/step_3_11_membrane_element_wgsl.md) | Override `PROJECTED` (tegangan terjepit) |
+| 3.12 | [kernels.ts, coupon.ts](step_3/step_3_12_kernels_ts_coupon_ts.md) | Perubahan kecil untuk reuse |
+| 3.13 | [newton.ts](step_3/step_3_13_newton_ts.md) | Inti Newton f32 generik |
+| 3.14 | [drape.ts](step_3/step_3_14_drape_ts.md) | Parsing soal drape |
+| 3.15 | [drape-gpu.ts](step_3/step_3_15_drape_gpu_ts.md) | Buffer bersama, 12 pipeline |
+| 3.16 | [drape-step.ts](step_3/step_3_16_drape_step_ts.md) | Langkah waktu f32, lintasan, probe |
+| 3.17 | [run-e3.ts](step_3/step_3_17_run_e3_ts.md) | Runner Step 3 |
+| 3.18 | [e3_compare.rs, e3_summarize.rs](step_3/step_3_18_e3_compare_rs_e3_summarize_rs.md) | Penilaian, probe, pertumbuhan PCG |
+| 3.19 | [run-e3.sh dan hasil](step_3/step_3_19_run_e3_sh_dan_hasil.md) | Hasil per gate dan artinya |
 
 ## Glosarium cepat
 
