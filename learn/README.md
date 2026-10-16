@@ -1,6 +1,6 @@
-# Seri Belajar: Jersey Engine, dari Nol sampai Step 3
+# Seri Belajar: Jersey Engine, dari Nol sampai Step 4
 
-Seri ini menjelaskan **setiap file** yang dikerjakan di Step 1 (Experiment 1), Step 2 (Experiment 2), dan Step 3 (Experiment 3) proyek `jersey-engine`.
+Seri ini menjelaskan **setiap file** yang dikerjakan di Step 1 (Experiment 1), Step 2 (Experiment 2), Step 3 (Experiment 3), dan Step 4 (Experiment 4) proyek `jersey-engine`.
 Penulisnya mengasumsikan kamu adalah **backend developer**: paham bahasa pemrograman, API, thread, antrean job, database, dan JSON, tetapi
 **belum pernah menulis kode GPU (WGSL / WebGPU)** dan tidak berlatar belakang komputasi numerik atau mekanika.
 
@@ -26,10 +26,12 @@ jersey-engine/
 ├── cases/         data uji Step 1 (matriks, solusi referensi, hasil GPU)
 ├── coupon/        data uji Step 2 (kupon kain, langkah beban, hasil GPU)
 ├── drape/         data uji Step 3 (kain jatuh, lintasan, probe, hasil GPU)
+├── drape4/        data uji Step 4 (referensi teregularisasi, hasil per rung ablation)
 ├── results/       ringkasan hasil per eksperimen + keputusan (verdict)
 ├── run-e1.sh      menjalankan Step 1 dari ujung ke ujung
 ├── run-e2.sh      menjalankan Step 2 dari ujung ke ujung
-└── run-e3.sh      menjalankan Step 3 dari ujung ke ujung
+├── run-e3.sh      menjalankan Step 3 dari ujung ke ujung
+└── run-e4.sh      menjalankan Step 4 (ablation A–D) dari ujung ke ujung
 ```
 
 ## Daftar isi
@@ -113,6 +115,22 @@ jersey-engine/
 | 3.17 | [run-e3.ts](step_3/step_3_17_run_e3_ts.md) | Runner Step 3 |
 | 3.18 | [e3_compare.rs, e3_summarize.rs](step_3/step_3_18_e3_compare_rs_e3_summarize_rs.md) | Penilaian, probe, pertumbuhan PCG |
 | 3.19 | [run-e3.sh dan hasil](step_3/step_3_19_run_e3_sh_dan_hasil.md) | Hasil per gate dan artinya |
+
+### Step 4: Newton yang robust dan hemat (Experiment 4)
+
+| No | File | Isi |
+|---|---|---|
+| 4.0 | [gambaran besar](step_4/step_4_0_gambaran_besar.md) | Ablation A–D, tiga perbaikan, hasil singkat |
+| 4.1 | [newton.rs](step_4/step_4_1_newton_rs.md) | Regularisasi Levenberg–Marquardt K + μM/h² |
+| 4.2 | [e4_rules.rs](step_4/step_4_2_e4_rules_rs.md) | Forcing Eisenstat–Walker, aturan berhenti, replay |
+| 4.3 | [drape.rs, e3_generate.rs, e3_compare.rs](step_4/step_4_3_drape_rs_e3_generate_rs_e3_compare_rs.md) | Skema generator, folder per rung |
+| 4.4 | [inertia.wgsl](step_4/step_4_4_inertia_wgsl.md) | μ di blok diagonal lewat buffer |
+| 4.5 | [drape-gpu.ts, drape-step.ts, newton.ts](step_4/step_4_5_drape_gpu_ts_drape_step_ts_newton_ts.md) | Perubahan kecil untuk reuse |
+| 4.6 | [timed-backend.ts](step_4/step_4_6_timed_backend_ts.md) | Decorator pengukur waktu per fase |
+| 4.7 | [robust-newton.ts](step_4/step_4_7_robust_newton_ts.md) | Newton f32 dengan tiga saklar ablation |
+| 4.8 | [drape-e4.ts, run-e4.ts](step_4/step_4_8_drape_e4_ts_run_e4_ts.md) | Langkah waktu robust, cek inersia, runner rung |
+| 4.9 | [e4_compare.rs, e4_summarize.rs](step_4/step_4_9_e4_compare_rs_e4_summarize_rs.md) | Replay aturan, gate, rung final |
+| 4.10 | [run-e4.sh dan hasil](step_4/step_4_10_run_e4_sh_dan_hasil.md) | Tabel ablation, gate per rung, kesimpulan |
 
 ## Glosarium cepat
 
