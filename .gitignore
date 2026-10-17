@@ -14,3 +14,5 @@ drape5/*/*/*.bin
 drape5/*.log
 drape5/*.err
 oracle/target-dev/
+drape7/*/*/*.bin
+drape7/*/*.bin

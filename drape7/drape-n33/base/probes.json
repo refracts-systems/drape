@@ -1,0 +1,1 @@
+{"probes":2,"steps":[1e0,5.6e1],"arrays":[{"name":"probe_steps","dtype":"u32","length":2,"offset":0},{"name":"probe_h","dtype":"f32","length":2,"offset":8},{"name":"probe_positions","dtype":"f32","length":6534,"offset":16}]}

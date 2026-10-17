@@ -1,0 +1,99 @@
+{
+ "schema": "e7-stop/1",
+ "rule": "Part 0.6: the f64 oracle did not reach its criterion within 400 PTC steps at n33 (cold start)",
+ "case": "drape-n33 base",
+ "ptc_steps": 400,
+ "final_relative_residual": 0.7331520817707019,
+ "reason": "cap",
+ "mu_cap_steps": 0,
+ "max_mu": 0,
+ "h_min": 0.004156372407109486,
+ "h_max_reached": 0.00567700095695693,
+ "steps_with_zero_inner_iterations": 57,
+ "first_step_with_inner_iterations": 58,
+ "steps_at_inner_cap_5": 311,
+ "per_step_displacement_free_fall_m": 0.0001703125,
+ "diagnosis": "during the free fall the static residual stays equal to the weight, so r_k / r_{k+1} = 1 and the SER controller never lengthens h: every step moves the cloth h0^2 g = 0.17 mm; the edges must fall ~0.25 m (about 1500 steps). Newton is not failing (0 mu retries, 0 mu-cap steps).",
+ "states": [
+  {
+   "state": 0,
+   "centre_z": 0.26,
+   "min_z": 0.26,
+   "r_over_L": 1,
+   "h": 0.004166666666666667,
+   "inner_newton_iterations": 0
+  },
+  {
+   "state": 25,
+   "centre_z": 0.2557421875000002,
+   "min_z": 0.2557421875000002,
+   "r_over_L": 1,
+   "h": 0.004166666666666667,
+   "inner_newton_iterations": 0
+  },
+  {
+   "state": 50,
+   "centre_z": 0.2514843750000004,
+   "min_z": 0.2514843750000004,
+   "r_over_L": 1,
+   "h": 0.004166666666666667,
+   "inner_newton_iterations": 0
+  },
+  {
+   "state": 57,
+   "centre_z": 0.250292179379056,
+   "min_z": 0.250292179379056,
+   "r_over_L": 0.9993087675508177,
+   "h": 0.004169548794091592,
+   "inner_newton_iterations": 1
+  },
+  {
+   "state": 75,
+   "centre_z": 0.2500618111833308,
+   "min_z": 0.24715542275336902,
+   "r_over_L": 0.9884585337956565,
+   "h": 0.0042153176124311124,
+   "inner_newton_iterations": 4
+  },
+  {
+   "state": 100,
+   "centre_z": 0.250034682377416,
+   "min_z": 0.24259592702135988,
+   "r_over_L": 0.9509208176756683,
+   "h": 0.004381717793129432,
+   "inner_newton_iterations": 5
+  },
+  {
+   "state": 150,
+   "centre_z": 0.25003216657751254,
+   "min_z": 0.22971762413297808,
+   "r_over_L": 0.9152034424152241,
+   "h": 0.004552721803220958,
+   "inner_newton_iterations": 5
+  },
+  {
+   "state": 200,
+   "centre_z": 0.25003618399703087,
+   "min_z": 0.21448571209162592,
+   "r_over_L": 0.8904167674923035,
+   "h": 0.004679456653092157,
+   "inner_newton_iterations": 5
+  },
+  {
+   "state": 300,
+   "centre_z": 0.25003145114618053,
+   "min_z": 0.18810480638567487,
+   "r_over_L": 0.8238388741392738,
+   "h": 0.005057623277391347,
+   "inner_newton_iterations": 5
+  },
+  {
+   "state": 399,
+   "centre_z": 0.2500214750675397,
+   "min_z": 0.15944511608084574,
+   "r_over_L": 0.7339556040695391,
+   "h": 0.00567700095695693,
+   "inner_newton_iterations": 5
+  }
+ ]
+}

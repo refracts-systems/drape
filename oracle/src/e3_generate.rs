@@ -69,7 +69,7 @@ pub fn generate(columns: usize, with_reference: bool, dir: &Path, scheme: &Schem
     let probes = trajectory.as_ref().map_or(Vec::new(), |t| probe_steps(&drape, t));
     let problem = problem_arrays(&drape, trajectory.as_ref(), &probes);
     problem.write(&dir.join("problem.bin"))?;
-    write_text(&dir.join("problem.json"), &problem_json(&drape, trajectory.as_ref(), scheme, &problem.manifest(), &probes))?;
+    write_text(&dir.join("problem.json"), &problem_json(&drape, trajectory.as_ref(), scheme, &problem.manifest(), &probes, Json::new()))?;
     if let Some(t) = &trajectory {
         let mut reference = BinaryArrays::new();
         reference.push_f64("positions", &t.positions.iter().flatten().flatten().copied().collect::<Vec<f64>>());
@@ -81,7 +81,7 @@ pub fn generate(columns: usize, with_reference: bool, dir: &Path, scheme: &Schem
     Ok(())
 }
 
-fn problem_arrays(drape: &Drape, trajectory: Option<&Trajectory>, probes: &[usize]) -> BinaryArrays {
+pub(crate) fn problem_arrays(drape: &Drape, trajectory: Option<&Trajectory>, probes: &[usize]) -> BinaryArrays {
     let mut arrays = BinaryArrays::new();
     arrays.push_f32("rest_positions", drape.rest_positions().iter().flatten().map(|&v| v as f32));
     arrays.push_u32("elem_vertices", drape.membranes.iter().flat_map(|e| e.vertices).map(|v| v as u32));
@@ -192,7 +192,7 @@ fn push_step_records(arrays: &mut BinaryArrays, t: &Trajectory) {
     arrays.push_f64("mu_cap_hit", &per_step(&|s| f64::from(u8::from(s.solution.regularization.cap_hit))));
 }
 
-fn problem_json(drape: &Drape, trajectory: Option<&Trajectory>, scheme: &Scheme, manifest: &str, probes: &[usize]) -> String {
+pub(crate) fn problem_json(drape: &Drape, trajectory: Option<&Trajectory>, scheme: &Scheme, manifest: &str, probes: &[usize], extra: Json) -> String {
     let m = &drape.material;
     let material = Json::new().number("wale_N_per_m", m.wale).number("course_N_per_m", m.course)
         .number("coupling_N_per_m", m.coupling).number("shear_N_per_m", m.shear);
@@ -223,6 +223,7 @@ fn problem_json(drape: &Drape, trajectory: Option<&Trajectory>, scheme: &Scheme,
         .raw("pcg", pcg.render())
         .raw("robust", crate::e4_rules::settings_json(scheme.resolution_factor).render())
         .raw("contact", crate::e5_checks::contact_json(drape, trajectory).render())
+        .extend(extra)
         .raw("arrays", manifest.to_string())
         .render()
 }
@@ -278,3 +279,9 @@ fn probe_steps(drape: &Drape, trajectory: &Trajectory) -> Vec<usize> {
 pub const E5_SCHEME: Scheme = Scheme { name: "e5", tangent: TangentKind::Exact, solver: Solver { regularized: true, floor_factor: Some(F64_FLOOR_FACTOR) },
     max_iterations: FINAL_NEWTON_ITERATIONS, resolution_factor: RESOLUTION_FACTOR, scene: Scene::SphereOnFloor,
     note: "E4-final scheme + vertex-vs-analytic-collider IPC barrier (floor + sphere), alpha <= alpha_max keeping 0.1 of every distance" };
+
+/// Experiment 7: the E5 scene solved to equilibrium by pseudo-transient continuation (the scheme only labels the problem files;
+/// the solver is e7_ptc).
+pub const E7_SCHEME: Scheme = Scheme { name: "e7", tangent: TangentKind::Exact, solver: Solver { regularized: true, floor_factor: Some(F64_FLOOR_FACTOR) },
+    max_iterations: 5, resolution_factor: RESOLUTION_FACTOR, scene: Scene::SphereOnFloor,
+    note: "quasi-static drape: pseudo-transient continuation, SER step size, inexact inner Newton (tol 0.1, 5 iterations)" };

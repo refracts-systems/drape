@@ -1,4 +1,4 @@
-# Seri Belajar: Jersey Engine, dari Nol sampai Step 6
+# Seri Belajar: Jersey Engine, dari Nol sampai Step 7
 
 Seri ini menjelaskan **setiap file** yang dikerjakan di Step 1 (Experiment 1), Step 2 (Experiment 2), Step 3 (Experiment 3), Step 4 (Experiment 4), Step 5 (Experiment 5), dan Step 6 (Experiment 6) proyek `jersey-engine`.
 Penulisnya mengasumsikan kamu adalah **backend developer**: paham bahasa pemrograman, API, thread, antrean job, database, dan JSON, tetapi
@@ -165,6 +165,13 @@ jersey-engine/
 | 6.5 | [robust-newton.ts, drape-e4.ts, contact-host.ts, run-e6.ts](step_6/step_6_5_robust_newton_drape_e4_contact_host_ts.md) | merangkai rung, median run |
 | 6.6 | [e6_compare.rs, e6_summarize.rs](step_6/step_6_6_e6_compare_e6_summarize_rs.md) | replay penerimaan, trigger, rung final |
 | 6.7 | [run-e6.sh dan hasil](step_6/step_6_7_run_e6_sh_dan_hasil.md) | semua angka, gate, regresi |
+
+### Step 7: Drape kuasi-statik (Experiment 7, berhenti di Part 0.6)
+
+| No | File | Isi |
+|---|---|---|
+| 7.0 | [gambaran besar](step_7/step_7_0_gambaran_besar.md) | PTC, aturan STOP, diagnosis |
+| 7.1 | [kode oracle](step_7/step_7_1_oracle_ptc.md) | `e7_ptc.rs`, `e7_run.rs`, `e7_prolong.rs`, `e7_state.rs`, parameter scene |
 
 ## Glosarium cepat
 

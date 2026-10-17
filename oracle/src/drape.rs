@@ -1,4 +1,5 @@
 use crate::bsr::Bsr;
+use std::cell::Cell;
 use crate::contact::{Barrier, Collider, Contact};
 use crate::cases::{hinge_elements, GRAVITY, SHEET_SIZE, TIME_STEP};
 use crate::hinge::HingeElement;
@@ -53,17 +54,30 @@ impl Scene {
 /// barrier activation d̂ = 1e-3·L, sheet released flat at 2r + 0.02·L.
 const SPHERE_RADIUS: f64 = 0.25 * SHEET_SIZE;
 pub const ACTIVATION_DISTANCE: f64 = 1e-3 * SHEET_SIZE;
-const RELEASE_HEIGHT: f64 = 2.0 * SPHERE_RADIUS + 0.02 * SHEET_SIZE;
 
-fn scene_contact(scene: Scene, mass: &[f64]) -> (Contact, f64) {
+/// Experiment 7 edits of the E5 scene, all 1 for the base scene: material stiffness factor (membrane and bending constants),
+/// sphere radius factor, rest length factor (the sheet is scaled about its centre; topology and numbering are unchanged).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SceneParams {
+    pub material: f64,
+    pub radius: f64,
+    pub rest: f64,
+}
+
+impl SceneParams {
+    pub const BASE: SceneParams = SceneParams { material: 1.0, radius: 1.0, rest: 1.0 };
+}
+
+fn scene_contact(scene: Scene, mass: &[f64], params: SceneParams) -> (Contact, f64) {
     if scene == Scene::PinnedCorners {
         return (Contact::none(), 0.0);
     }
     let floor = Collider::Plane { normal: [0.0, 0.0, 1.0], offset: 0.0 };
-    let ball = Collider::Sphere { centre: [0.5 * SHEET_SIZE, 0.5 * SHEET_SIZE, SPHERE_RADIUS], radius: SPHERE_RADIUS };
+    let radius = SPHERE_RADIUS * params.radius;
+    let ball = Collider::Sphere { centre: [0.5 * SHEET_SIZE, 0.5 * SHEET_SIZE, radius], radius };
     let heaviest = mass.iter().copied().fold(0.0, f64::max);
     let barrier = Barrier { dhat: ACTIVATION_DISTANCE, kappa: Barrier::resting_kappa(ACTIVATION_DISTANCE, heaviest, GRAVITY) };
-    (Contact { colliders: vec![floor, ball], barrier }, RELEASE_HEIGHT)
+    (Contact { colliders: vec![floor, ball], barrier }, 2.0 * radius + 0.02 * SHEET_SIZE)
 }
 
 /// A 0.5 m knit sheet, flat in xy at height `lift`, falling under gravity (−z): pinned at its two top corners (E3/E4),
@@ -82,6 +96,25 @@ pub struct Drape {
     pub scene: Scene,
     pub contact: Contact,
     pub lift: f64,
+    /// Step size h of M/h²; the dynamic experiments keep TIME_STEP, the pseudo-transient solver sets it per step.
+    pub time_step: Cell<f64>,
+}
+
+/// The knit baseline with every stiffness (membrane and bending) multiplied by `factor`; density is unchanged.
+fn scaled_material(factor: f64) -> Material {
+    let base = Material::knit_baseline();
+    Material { wale: factor * base.wale, course: factor * base.course, coupling: factor * base.coupling, shear: factor * base.shear,
+        bend_wale: factor * base.bend_wale, bend_course: factor * base.bend_course, ..base }
+}
+
+/// The sheet grid with all rest lengths multiplied by `factor` about the sheet centre (1 leaves the mesh untouched).
+fn scaled_mesh(columns: usize, factor: f64) -> Mesh {
+    let mut mesh = Mesh::grid(columns, columns, SHEET_SIZE, SHEET_SIZE);
+    if factor != 1.0 {
+        let centre = 0.5 * SHEET_SIZE;
+        mesh.rest.iter_mut().for_each(|p| *p = [centre + factor * (p[0] - centre), centre + factor * (p[1] - centre)]);
+    }
+    mesh
 }
 
 /// Free vertices, their unknown rows and the BSR pattern of membranes and hinges over them.
@@ -101,21 +134,27 @@ impl Drape {
     }
 
     pub fn for_scene(columns: usize, tangent_kind: TangentKind, scene: Scene) -> Drape {
-        let mesh = Mesh::grid(columns, columns, SHEET_SIZE, SHEET_SIZE);
-        let material = Material::knit_baseline();
+        Drape::for_scene_with(columns, tangent_kind, scene, SceneParams::BASE)
+    }
+
+    pub fn for_scene_with(columns: usize, tangent_kind: TangentKind, scene: Scene, params: SceneParams) -> Drape {
+        let mesh = scaled_mesh(columns, params.rest);
+        let material = scaled_material(params.material);
         let fixed = if scene == Scene::PinnedCorners { vec![(mesh.rows - 1) * mesh.columns, mesh.rows * mesh.columns - 1] } else { Vec::new() };
         let (free, row_of, pattern) = unknown_layout(&mesh, &fixed);
         let membranes: Vec<MembraneElement> = mesh.triangles.iter().map(|&t| MembraneElement::new(t, &mesh.rest)).collect();
         let hinges = hinge_elements(&mesh, &material);
         let mass: Vec<f64> = mesh.vertex_areas().iter().map(|a| material.density * a).collect();
-        let (contact, lift) = scene_contact(scene, &mass);
-        Drape { mesh, material, membranes, hinges, fixed, row_of, free, pattern, mass, tangent_kind, scene, contact, lift }
+        let (contact, lift) = scene_contact(scene, &mass, params);
+        Drape { mesh, material, membranes, hinges, fixed, row_of, free, pattern, mass, tangent_kind, scene, contact, lift, time_step: Cell::new(TIME_STEP) }
     }
 
     /// The drape a problem.json describes (its "scene", pinned when absent).
     pub fn from_problem(problem: &str, tangent_kind: TangentKind) -> Drape {
         let columns = crate::jsonscan::number(problem, "", "grid_columns") as usize;
-        Drape::for_scene(columns, tangent_kind, Scene::parse(&crate::jsonscan::string(problem, "", "scene")))
+        let factor = |key: &str| { let v = crate::jsonscan::number(problem, "scene_params", key); if v.is_finite() { v } else { 1.0 } };
+        let params = SceneParams { material: factor("material_factor"), radius: factor("radius_factor"), rest: factor("rest_factor") };
+        Drape::for_scene_with(columns, tangent_kind, Scene::parse(&crate::jsonscan::string(problem, "", "scene")), params)
     }
 
     pub fn rows(&self) -> usize {
@@ -174,7 +213,7 @@ impl Drape {
     }
 
     pub fn mass_over_h2(&self, vertex: usize) -> f64 {
-        self.mass[vertex] / (TIME_STEP * TIME_STEP)
+        self.mass[vertex] / (self.time_step.get() * self.time_step.get())
     }
 
     pub fn membrane_hessian(&self, element: &MembraneElement, x: &[Vec3]) -> [[Mat3; 3]; 3] {
