@@ -12,7 +12,6 @@ use crate::e5_checks::{active_counts, contact_derivative_check, contact_state};
 use crate::io::{read_f32_file, write_text, Json};
 use crate::jsonscan::{flag, string};
 use crate::linalg::Vec3;
-use crate::newton::NewtonSystem;
 use std::fs;
 use std::path::Path;
 
@@ -23,7 +22,7 @@ const BARRIER_IDENTITY_LIMIT: f64 = 1e-12;
 const CONTACT_KERNEL_RELATIVE: f64 = 1e-5;
 const CONTACT_KERNEL_COND_FACTOR: f64 = 8.0;
 /// α_max recomputed in f64 from the recorded probe iterates and directions must match the GPU to 1e-5 relative.
-const ALPHA_REPLAY_LIMIT: f64 = 1e-5;
+const ALPHA_RELATIVE_LIMIT: f64 = 1e-5;
 
 fn to_states(values: &[f32], vertices: usize) -> Vec<Vec<Vec3>> {
     values.chunks_exact(3 * vertices).map(|x| x.chunks_exact(3).map(|p| [p[0] as f64, p[1] as f64, p[2] as f64]).collect()).collect()
@@ -68,15 +67,37 @@ fn min_distance(drape: &Drape, states: &[Vec<Vec3>]) -> f64 {
     states.iter().flat_map(|x| drape.free.iter().map(move |&i| drape.contact.min_distance(x[i]))).fold(f64::INFINITY, f64::min)
 }
 
-/// Largest relative gap between the GPU's α_max and the f64 rule at the recorded probe iterate x_k and direction p_k.
-fn alpha_replay(drape: &Drape, gpu_dir: &Path, iterates: &[Iterate]) -> Result<f64, String> {
+/// α_max replay: updates checked, updates that needed the condition branch of the tolerance, worst error/tolerance.
+pub struct AlphaReplay {
+    pub updates: usize,
+    pub needing_cond: usize,
+    pub worst_ratio: f64,
+}
+
+/// ε32 of the replay tolerance max(1e-5, 8·ε32·cond_α).
+const ALPHA_EPSILON: f64 = 1.0 / 8388608.0;
+const ALPHA_COND_FACTOR: f64 = 8.0;
+
+/// For every probe update: the GPU's α_max against the f64 rule at the recorded iterate x_k and direction p_k, with the
+/// tolerance max(1e-5, 8·ε32·cond_α), cond_α = |q|/d0 of the limiting sphere (1 for the plane).
+fn alpha_replay(drape: &Drape, gpu_dir: &Path, iterates: &[Iterate]) -> Result<AlphaReplay, String> {
     let pairs = to_states(&read_f32_file(&gpu_dir.join("gpu-probe-directions.bin"))?, drape.mesh.rest.len());
     let updates: Vec<&Iterate> = iterates.iter().filter(|it| it.pcg_iterations.is_finite()).collect();
     if pairs.len() != 2 * updates.len() {
         return Err(format!("{} direction states for {} probe updates", pairs.len(), updates.len()));
     }
     let step = DrapeStep { drape, x_hat: Vec::new() };
-    Ok(updates.iter().zip(pairs.chunks_exact(2)).map(|(it, pair)| ((step.max_step(&pair[0], &pair[1]) - it.alpha_max) / it.alpha_max).abs()).fold(0.0, f64::max))
+    let rows: Vec<(f64, f64)> = updates.iter().zip(pairs.chunks_exact(2)).map(|(it, pair)| {
+        let (alpha, limit) = step.max_step_detail(&pair[0], &pair[1]);
+        let cond = limit.map_or(1.0, |(vertex, collider)| drape.contact.distance_condition(collider, pair[0][vertex]));
+        let tolerance = ALPHA_RELATIVE_LIMIT.max(ALPHA_COND_FACTOR * ALPHA_EPSILON * cond);
+        (((alpha - it.alpha_max) / it.alpha_max).abs(), tolerance)
+    }).collect();
+    Ok(AlphaReplay {
+        updates: rows.len(),
+        needing_cond: rows.iter().filter(|(error, _)| *error > ALPHA_RELATIVE_LIMIT).count(),
+        worst_ratio: rows.iter().map(|(error, tolerance)| error / tolerance).fold(0.0, f64::max),
+    })
 }
 
 /// The f32 spacing the GPU recorded for each probe update equals f32_spacing(max |x_i|) of the iterate it was recorded at.
@@ -130,8 +151,8 @@ fn contact_checks(drape: &Drape, gpu_dir: &Path, gpu_states: &[Vec<Vec3>], itera
         .number("min_distance_over_dhat_f32_states", nearest[0] / dhat).number("min_distance_over_dhat_accepted_iterates", nearest[1] / dhat)
         .number("min_distance_over_dhat_probe_iterates", nearest[2] / dhat);
     let verdict = Json::new().flag("contact_kernel_ok", kernel[1] == 0.0)
-        .flag("contact_fd_ok", fd.gradient_error.max(fd.barrier_gradient_error) <= FD_GRADIENT_LIMIT && fd.hessian_error.max(fd.barrier_hessian_error) <= FD_HESSIAN_LIMIT)
-        .flag("barrier_energy_change_identity_ok", fd.barrier_change_error <= BARRIER_IDENTITY_LIMIT)
+        .flag("contact_fd_ok", fd.patch[0].max(fd.patch[2]) <= FD_GRADIENT_LIMIT && fd.patch[1].max(fd.patch[3]) <= FD_HESSIAN_LIMIT)
+        .flag("barrier_energy_change_identity_ok", fd.patch[4] <= BARRIER_IDENTITY_LIMIT)
         .flag("intersection_free", nearest.iter().all(|&d| d > 0.0));
     Ok(Scored { json, verdict })
 }
@@ -160,38 +181,71 @@ fn reference_checks(dir: &Path, gpu_dir: &Path, base: &str, newton_per_step: f64
 }
 
 
-/// Forcing, termination (with resolution) and, at probes, α_max and resolution replays: (all pass, α_max gap, resolution ok).
-fn rules(drape: &Drape, gpu_dir: &Path, groups: &[Vec<&Iterate>], probe_iterates: Option<&[Iterate]>) -> Result<(bool, f64, bool), String> {
-    let alpha = probe_iterates.map_or(Ok(0.0), |its| alpha_replay(drape, gpu_dir, its))?;
-    let resolution = probe_iterates.map_or(Ok(true), |its| resolution_replay(drape, gpu_dir, its))?;
-    let forcing_ok = forcing_replay(groups, true, f64::NAN) <= FORCING_REPLAY_LIMIT && termination_replay(groups, true);
-    Ok((forcing_ok && alpha <= ALPHA_REPLAY_LIMIT && resolution, alpha, resolution))
+/// What the rule replays found: all passed, the α_max replay, whether the resolution matched.
+struct Replays {
+    ok: bool,
+    alpha: Option<AlphaReplay>,
+    resolution_ok: bool,
 }
 
-/// Scores one drape5 case: every E3/E4 check plus the contact checks; writes <dir>/gpu/result.json.
-pub fn run(dir: &Path) -> Result<(), String> {
-    let (gpu_dir, problem) = (dir.join("gpu"), fs::read_to_string(dir.join("problem.json")).map_err(|e| e.to_string())?);
-    let gpu = fs::read_to_string(gpu_dir.join("gpu-result.json")).map_err(|e| e.to_string())?;
+/// Forcing, termination (with resolution) and, at probes, α_max and resolution replays.
+fn rules(drape: &Drape, gpu_dir: &Path, groups: &[Vec<&Iterate>], probe_iterates: Option<&[Iterate]>) -> Result<Replays, String> {
+    let alpha = probe_iterates.map(|its| alpha_replay(drape, gpu_dir, its)).transpose()?;
+    let resolution_ok = probe_iterates.map_or(Ok(true), |its| resolution_replay(drape, gpu_dir, its))?;
+    let forcing_ok = forcing_replay(groups, true, f64::NAN) <= FORCING_REPLAY_LIMIT && termination_replay(groups, true);
+    let alpha_ok = alpha.as_ref().map_or(true, |a| a.worst_ratio <= 1.0);
+    Ok(Replays { ok: forcing_ok && alpha_ok && resolution_ok, alpha, resolution_ok })
+}
+
+fn alpha_json(replay: Option<&AlphaReplay>) -> Json {
+    match replay {
+        Some(a) => Json::new().integer("alpha_replay_updates", a.updates).integer("alpha_replay_updates_needing_cond", a.needing_cond)
+            .number("alpha_replay_worst_error_over_tolerance", a.worst_ratio),
+        None => Json::new(),
+    }
+}
+
+/// Everything one scored GPU run of a drape5 case knows, for the writers of the E5 and E6 results.
+pub struct CaseScore {
+    pub drape: Drape,
+    pub base: String,
+    pub iterates: Vec<Iterate>,
+    pub probe_iterates: Vec<Iterate>,
+    pub reference: Option<Reference>,
+    pub gpu_states: Vec<Vec<Vec3>>,
+    pub verdict: Json,
+    pub json: Json,
+}
+
+/// Scores one GPU run (`gpu_dir`) of the case in `dir`: every E3/E4 check plus the contact checks.
+pub fn score_case(dir: &Path, gpu_dir: &Path) -> Result<CaseScore, String> {
+    let (problem, gpu) = (fs::read_to_string(dir.join("problem.json")).map_err(|e| e.to_string())?, fs::read_to_string(gpu_dir.join("gpu-result.json")).map_err(|e| e.to_string())?);
     let drape = Drape::from_problem(&problem, TangentKind::Exact);
-    let base = score(dir, &gpu_dir)?;
-    let iterates = read_iterates(&gpu_dir, "")?;
+    let base = score(dir, gpu_dir)?;
+    let iterates = read_iterates(gpu_dir, "")?;
     let stats = trajectory_stats(&by_step(&iterates));
     let gpu_states = to_states(&read_f32_file(&gpu_dir.join("gpu-trajectory.bin"))?, drape.mesh.rest.len());
     let reference = if flag(&problem, "", "reference") { Some(Reference::load(dir, drape.mesh.rest.len())?) } else { None };
-    let probe_iterates = if reference.is_some() { read_iterates(&gpu_dir, "probe-")? } else { Vec::new() };
-    let (rules_ok, alpha, resolution_ok) = rules(&drape, &gpu_dir, &by_step(&iterates), reference.as_ref().map(|_| probe_iterates.as_slice()))?;
-    let contact = contact_checks(&drape, &gpu_dir, &gpu_states, &[&iterates, &probe_iterates])?;
-    let verdict = base_verdict(&base, inertia_error(&drape, &gpu_dir)?, rules_ok).extend(contact.verdict);
+    let probe_iterates = if reference.is_some() { read_iterates(gpu_dir, "probe-")? } else { Vec::new() };
+    let replays = rules(&drape, gpu_dir, &by_step(&iterates), reference.as_ref().map(|_| probe_iterates.as_slice()))?;
+    let contact = contact_checks(&drape, gpu_dir, &gpu_states, &[&iterates, &probe_iterates])?;
+    let verdict = base_verdict(&base, inertia_error(&drape, gpu_dir)?, replays.ok).extend(contact.verdict);
     let json = Json::new().text("schema", "e5-result/1").text("case", &string(&problem, "", "case")).integer("unknowns", 3 * drape.rows())
-        .raw("robust", robust_json(&stats, &gpu).number("alpha_replay_error", alpha).flag("resolution_replay_ok", resolution_ok).render())
+        .raw("robust", robust_json(&stats, &gpu).extend(alpha_json(replays.alpha.as_ref())).flag("resolution_replay_ok", replays.resolution_ok).render())
         .raw("contact", contact.json.extend(contact_json(&drape, &gpu_states, reference.as_ref())).render());
-    let checked = if reference.is_some() { Some(reference_checks(dir, &gpu_dir, &base, stats.newton_per_step)?) } else { None };
-    let (verdict, json) = match checked { Some(c) => (verdict.extend(c.verdict), json.extend(c.json)), None => (verdict, json) };
-    write_result(&gpu_dir, verdict, json, base)
+    let (verdict, json) = if reference.is_some() { let c = reference_checks(dir, gpu_dir, &base, stats.newton_per_step)?; (verdict.extend(c.verdict), json.extend(c.json)) } else { (verdict, json) };
+    Ok(CaseScore { drape, base, iterates, probe_iterates, reference, gpu_states, verdict, json })
 }
 
-/// The E5 verdict first (jsonscan reads the first "verdict"), then the E5 details, then the full E3 result.
-fn write_result(gpu_dir: &Path, verdict: Json, json: Json, base: String) -> Result<(), String> {
+/// Scores one drape5 case (GPU outputs in <dir>/gpu) and writes <dir>/gpu/result.json.
+pub fn run(dir: &Path) -> Result<(), String> {
+    let gpu_dir = dir.join("gpu");
+    let score = score_case(dir, &gpu_dir)?;
+    write_result(&gpu_dir, score.verdict, score.json, score.base)
+}
+
+/// The verdict first (jsonscan reads the first "verdict"), then the details, then the full E3 result.
+pub fn write_result(gpu_dir: &Path, verdict: Json, json: Json, base: String) -> Result<(), String> {
     let rendered = Json::new().raw("verdict", verdict.render()).extend(json).raw("e3_checks", base).render();
     write_text(&gpu_dir.join("result.json"), &rendered)?;
     println!("{rendered}");

@@ -11,7 +11,7 @@ use std::fs;
 use std::path::Path;
 
 /// The time step `step` of a stored f64 trajectory: x_{k−1}, v_{k−1} and the step's energy.
-fn step_from<'a>(drape: &'a Drape, reference: &Reference, step: usize) -> DrapeStep<'a> {
+pub(crate) fn step_from<'a>(drape: &'a Drape, reference: &Reference, step: usize) -> DrapeStep<'a> {
     let x = &reference.positions[step - 1];
     let v: Vec<Vec3> = if step == 1 { vec![[0.0; 3]; x.len()] } else {
         x.iter().zip(&reference.positions[step - 2]).map(|(p, q)| std::array::from_fn(|d| (p[d] - q[d]) / TIME_STEP)).collect()

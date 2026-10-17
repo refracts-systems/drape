@@ -99,25 +99,71 @@ pub fn contact_json(drape: &Drape, trajectory: Option<&Trajectory>) -> Json {
         .integer("most_active_step", events.most_active)
 }
 
-/// FD checks with every barrier active: Φ (inertia + elastic + barrier) and the barrier alone, plus the barrier
-/// energy-change identity (per-vertex change vs difference of totals).
-pub struct ContactDerivativeCheck {
-    pub gradient_error: f64,
-    pub hessian_error: f64,
-    pub barrier_gradient_error: f64,
-    pub barrier_hessian_error: f64,
-    pub barrier_change_error: f64,
-    pub barrier_step: f64,
+/// A patch of consecutive free vertices with a random direction on it, for a derivative check whose rounding does not
+/// grow with the mesh.
+struct Patch {
+    vertices: Vec<usize>,
+    direction: Vec<Vec3>,
 }
 
-fn direction(drape: &Drape, rng: &mut Lcg) -> Vec<Vec3> {
-    let mut v = vec![[0.0; 3]; drape.mesh.rest.len()];
-    drape.free.iter().for_each(|&i| v[i] = [rng.uniform(), rng.uniform(), rng.uniform()]);
-    v
+/// Vertices per patch.
+const PATCH_SIZE: usize = 16;
+
+fn patches(drape: &Drape, rng: &mut Lcg) -> Vec<Patch> {
+    let span = drape.free.len() - PATCH_SIZE;
+    (0..FD_DIRECTIONS).map(|_| {
+        let start = (((rng.uniform() + 1.0) / 2.0) * span as f64) as usize;
+        let vertices: Vec<usize> = drape.free[start..start + PATCH_SIZE].to_vec();
+        let mut direction = vec![[0.0; 3]; drape.mesh.rest.len()];
+        vertices.iter().for_each(|&i| direction[i] = [rng.uniform(), rng.uniform(), rng.uniform()]);
+        Patch { vertices, direction }
+    }).collect()
+}
+
+fn global_directions(drape: &Drape, rng: &mut Lcg) -> Vec<Patch> {
+    (0..FD_DIRECTIONS).map(|_| {
+        let mut direction = vec![[0.0; 3]; drape.mesh.rest.len()];
+        drape.free.iter().for_each(|&i| direction[i] = [rng.uniform(), rng.uniform(), rng.uniform()]);
+        Patch { vertices: drape.free.clone(), direction }
+    }).collect()
 }
 
 fn shifted(x: &[Vec3], v: &[Vec3], h: f64) -> Vec<Vec3> {
     x.iter().zip(v).map(|(p, d)| std::array::from_fn(|k| p[k] + h * d[k])).collect()
+}
+
+/// The five errors of one direction: Φ gradient, Φ Hessian, barrier gradient, barrier Hessian, barrier energy change.
+/// Differences of Φ and of the barrier use sums over the patch only (all vertices for a global direction).
+fn errors(step: &DrapeStep, x: &[Vec3], patch: &Patch, scaled_phi_step: bool) -> [f64; 5] {
+    let drape = step.drape;
+    let (v, rows) = (&patch.direction, step.gather(&patch.direction));
+    let barrier_step = BARRIER_FD_FRACTION * patch.vertices.iter().map(|&i| drape.contact.min_distance(x[i])).fold(f64::INFINITY, f64::min);
+    let local_barrier = |z: &[Vec3]| patch.vertices.iter().map(|&i| drape.contact.energy(z[i])).sum::<f64>();
+    let phi_step = if scaled_phi_step { barrier_step } else { FD_STEP };
+    let alpha = 0.5 * step.max_step(x, v).min(ACTIVATION_DISTANCE);
+    let identity = {
+        let direct = local_barrier(&shifted(x, v, alpha)) - local_barrier(x);
+        (step.barrier_change(x, v, alpha) - direct).abs() / direct.abs()
+    };
+    [
+        directional_error(&|z| step.local_value(z, &patch.vertices), &step.residual(x), &rows, x, v, phi_step),
+        hessian_error(&|z| step.residual(z), &step.tangent(x).multiply(&rows), x, v, phi_step),
+        directional_error(&local_barrier, &barrier_rows(drape, x), &rows, x, v, barrier_step),
+        hessian_error(&|z| barrier_rows(drape, z), &barrier_hessian_times(drape, x, v), x, v, barrier_step),
+        identity,
+    ]
+}
+
+fn worst(step: &DrapeStep, x: &[Vec3], patches: &[Patch], scaled_phi_step: bool) -> [f64; 5] {
+    patches.iter().map(|p| errors(step, x, p, scaled_phi_step)).fold([0.0; 5], |w, e| std::array::from_fn(|k| w[k].max(e[k])))
+}
+
+/// FD checks with every barrier active: Φ (inertia + elastic + barrier), the barrier alone and the barrier energy-change
+/// identity. The gated numbers use patch directions; the global-direction numbers are reported without a gate.
+pub struct ContactDerivativeCheck {
+    pub patch: [f64; 5],
+    pub global: [f64; 5],
+    pub patch_scaled_phi_step: [f64; 5],
 }
 
 pub fn contact_derivative_check(drape: &Drape) -> ContactDerivativeCheck {
@@ -125,17 +171,9 @@ pub fn contact_derivative_check(drape: &Drape) -> ContactDerivativeCheck {
     let x = contact_state(drape);
     let x_hat: Vec<Vec3> = x.iter().map(|p| p.map(|v| v + 1e-4 * rng.uniform())).collect();
     let step = DrapeStep { drape, x_hat };
-    let directions: Vec<Vec<Vec3>> = (0..FD_DIRECTIONS).map(|_| direction(drape, &mut rng)).collect();
-    let worst = |f: &dyn Fn(&[Vec3]) -> f64| directions.iter().map(|v| f(v)).fold(0.0, f64::max);
-    let barrier_step = BARRIER_FD_FRACTION * drape.free.iter().map(|&i| drape.contact.min_distance(x[i])).fold(f64::INFINITY, f64::min);
-    ContactDerivativeCheck {
-        gradient_error: worst(&|v| directional_error(&|z| step.value(z), &step.residual(&x), &step.gather(v), &x, v, FD_STEP)),
-        hessian_error: worst(&|v| hessian_error(&|z| step.residual(z), &step.tangent(&x).multiply(&step.gather(v)), &x, v, FD_STEP)),
-        barrier_gradient_error: worst(&|v| directional_error(&|z| drape.barrier_energy(z), &barrier_rows(drape, &x), &step.gather(v), &x, v, barrier_step)),
-        barrier_hessian_error: worst(&|v| hessian_error(&|z| barrier_rows(drape, z), &barrier_hessian_times(drape, &x, v), &x, v, barrier_step)),
-        barrier_change_error: worst(&|v| barrier_change_error(&step, &x, v)),
-        barrier_step,
-    }
+    let drawn = patches(drape, &mut rng);
+    let (patch, scaled) = (worst(&step, &x, &drawn, false), worst(&step, &x, &drawn, true));
+    ContactDerivativeCheck { patch, global: worst(&step, &x, &global_directions(drape, &mut rng), false), patch_scaled_phi_step: scaled }
 }
 
 fn barrier_rows(drape: &Drape, x: &[Vec3]) -> Vec<f64> {
@@ -161,24 +199,18 @@ fn hessian_error(gradient: &dyn Fn(&[Vec3]) -> Vec<f64>, exact: &[f64], x: &[Vec
     difference_norm(&fd, exact) / vector_norm(exact)
 }
 
-/// Along half the largest admissible step, so every vertex stays strictly outside its collider.
-fn barrier_change_error(step: &DrapeStep, x: &[Vec3], v: &[Vec3]) -> f64 {
-    let alpha = 0.5 * step.max_step(x, v).min(ACTIVATION_DISTANCE);
-    let direct = step.drape.barrier_energy(&shifted(x, v, alpha)) - step.drape.barrier_energy(x);
-    (step.barrier_change(x, v, alpha) - direct).abs() / direct.abs()
-}
-
 impl ContactDerivativeCheck {
     pub fn json(&self) -> Json {
+        let set = |e: &[f64; 5]| Json::new().number("gradient_relative_error", e[0]).number("hessian_relative_error", e[1])
+            .number("barrier_gradient_relative_error", e[2]).number("barrier_hessian_relative_error", e[3])
+            .number("barrier_energy_change_relative_error", e[4]);
         Json::new()
             .number("fd_step_m", FD_STEP)
-            .number("barrier_fd_step_m", self.barrier_step)
             .integer("directions", FD_DIRECTIONS)
-            .number("gradient_relative_error", self.gradient_error)
-            .number("hessian_relative_error", self.hessian_error)
-            .number("barrier_gradient_relative_error", self.barrier_gradient_error)
-            .number("barrier_hessian_relative_error", self.barrier_hessian_error)
-            .number("barrier_energy_change_relative_error", self.barrier_change_error)
+            .integer("patch_vertices", PATCH_SIZE)
+            .raw("patch", set(&self.patch).render())
+            .raw("global_no_gate", set(&self.global).render())
+            .raw("patch_phi_step_scaled_no_gate", set(&self.patch_scaled_phi_step).render())
     }
 }
 
@@ -201,11 +233,15 @@ mod tests {
         assert!(counts[0].0 > 0 && counts[0].1 > 0, "{:?}", counts);
     }
 
+    /// The derivative code is checked with the Φ finite-difference step scaled to the smallest distance of the patch: the fixed
+    /// step of the gate (1e-7 m) has a truncation error (h/d)² of its own once a vertex is within ~1e-5 m of a collider.
     #[test]
     fn active_barrier_derivatives_match_finite_differences() {
         let check = contact_derivative_check(&scene());
-        assert!(check.gradient_error <= 1e-6 && check.barrier_gradient_error <= 1e-6, "{} {}", check.gradient_error, check.barrier_gradient_error);
-        assert!(check.hessian_error <= 1e-5 && check.barrier_hessian_error <= 1e-5, "{} {}", check.hessian_error, check.barrier_hessian_error);
-        assert!(check.barrier_change_error <= 1e-12, "{}", check.barrier_change_error);
+        let e = check.patch_scaled_phi_step;
+        assert!(e[0] <= 1e-6 && e[2] <= 1e-6, "{} {}", e[0], e[2]);
+        assert!(e[1] <= 1e-5 && e[3] <= 1e-5, "{} {}", e[1], e[3]);
+        assert!(e[4] <= 1e-12, "{}", e[4]);
+        assert!(check.patch[2] <= 1e-6 && check.patch[3] <= 1e-5, "{:?}", check.patch);
     }
 }

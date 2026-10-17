@@ -1,5 +1,6 @@
 import type { DrapeProblem } from "./drape.ts";
 import type { DrapeGpu } from "./drape-gpu.ts";
+import { decodeReduced, SLOT, type Reducers } from "./reductions.ts";
 import type { ContactHooks } from "./robust-newton.ts";
 
 const HEADER = 4;
@@ -23,7 +24,7 @@ export function minDistance(problem: DrapeProblem, positions: Float32Array): num
   }, Number.POSITIVE_INFINITY);
 }
 
-/** The minimum per-row bound of the CCD kernel and the vertex of its row. */
+/** The minimum per-row bound of the CCD kernel and the vertex of its row (reads every per-row bound). */
 async function maxStep<A, K>(gpu: DrapeGpu<A, K>, problem: DrapeProblem): Promise<{ readonly alpha: number; readonly vertex: number }> {
   await gpu.backend.run(gpu.ccd);
   const bounds = new Float32Array(await gpu.backend.read(gpu.bounds));
@@ -31,10 +32,32 @@ async function maxStep<A, K>(gpu: DrapeGpu<A, K>, problem: DrapeProblem): Promis
   return { alpha: bounds[row], vertex: bounds[row] < 1 ? problem.u32.row_vertex[row] : -1 };
 }
 
-/** Collider hooks for the robust Newton, or null when the problem has no colliders (Experiments 3 and 4). */
-export function contactHooks<A, K>(gpu: DrapeGpu<A, K>, problem: DrapeProblem): ContactHooks | null {
+/** The same minimum reduced on the GPU: (α_max, row) read back as 32 bytes. */
+async function maxStepOnGpu<A, K>(gpu: DrapeGpu<A, K>, problem: DrapeProblem, reducers: Reducers<A, K>): Promise<{ readonly alpha: number; readonly vertex: number }> {
+  await gpu.backend.run([...gpu.ccd, ...reducers.boundMin]);
+  const { floats, boundRow } = decodeReduced(await gpu.backend.read(reducers.reduced));
+  const alpha = floats[SLOT.bound];
+  return { alpha, vertex: alpha < 1 ? problem.u32.row_vertex[boundRow] : -1 };
+}
+
+/** Smallest vertex-collider distance of `positions` in f32, reduced on the GPU. */
+async function minDistanceOnGpu<A, K>(gpu: DrapeGpu<A, K>, reducers: Reducers<A, K>, positions: Float32Array<ArrayBuffer>): Promise<number> {
+  gpu.backend.write(gpu.positions, positions);
+  await gpu.backend.run([...gpu.ccd, ...reducers.distanceMin]);
+  return decodeReduced(await gpu.backend.read(reducers.reduced)).floats[SLOT.distance];
+}
+
+/** Collider hooks for the robust Newton, or null when the problem has no colliders (Experiments 3 and 4). With `gpuMinima`
+ * the bound minimum and the per-iterate minimum distance are reduced on the GPU (Experiment 6, rung D); otherwise the host
+ * reads every bound and evaluates the distance in f64. */
+export function contactHooks<A, K>(gpu: DrapeGpu<A, K>, problem: DrapeProblem, gpuMinima = false): ContactHooks | null {
   if (problem.contact.count === 0) return null;
-  return { maxStep: () => maxStep(gpu, problem), minDistance: (positions) => minDistance(problem, positions) };
+  const reducers = gpu.reducers;
+  if (gpuMinima && reducers === null) throw new Error("GPU minima need the reduction kernels (prepareDrapeGpu withReducers)");
+  if (gpuMinima && reducers !== null) {
+    return { maxStep: () => maxStepOnGpu(gpu, problem, reducers), minDistance: (positions) => minDistanceOnGpu(gpu, reducers, positions) };
+  }
+  return { maxStep: () => maxStep(gpu, problem), minDistance: async (positions) => minDistance(problem, positions) };
 }
 
 /** Runs `work` with the collider count set to 0 (kernel checks at states that are not collision-free), then restores it. */

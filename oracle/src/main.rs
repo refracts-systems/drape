@@ -22,6 +22,9 @@ mod e4_summarize;
 mod e5_checks;
 mod e5_compare;
 mod e5_summarize;
+mod e6_compare;
+mod e6_rescore;
+mod e6_summarize;
 mod generate;
 mod hinge;
 mod io;
@@ -59,7 +62,10 @@ const USAGE: &str = "usage:
   oracle e4-diagnose --dir <drape dir> --step <k> --out <diagnosis.json>
   oracle e5-generate --n <grid columns> --out <dir> [--reference true|false]
   oracle e5-compare --dir <drape5 dir>
-  oracle e5-summarize --dir <drape5 dir> --baseline <experiment4-final.json> --out <summary.json>";
+  oracle e5-summarize --dir <drape5 dir> --baseline <experiment4-final.json> --out <summary.json>
+  oracle e6-rescore --root <repo root> --out <rescore.json>
+  oracle e6-compare --dir <drape5 case dir> --rung <A|B|C|D>
+  oracle e6-summarize --dir <drape5 dir> --out <summary.json>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -91,6 +97,9 @@ fn dispatch(args: &[String]) -> Result<(), String> {
         "e5-generate" => e3_generate::generate(number(&flags, "n", "33")?, number(&flags, "reference", "true")?, &PathBuf::from(required(&flags, "out")?), &e3_generate::E5_SCHEME),
         "e5-compare" => e5_compare::run(&PathBuf::from(required(&flags, "dir")?)),
         "e5-summarize" => e5_summarize::run(&PathBuf::from(required(&flags, "dir")?), &PathBuf::from(required(&flags, "baseline")?), &PathBuf::from(required(&flags, "out")?)),
+        "e6-rescore" => e6_rescore::run(&PathBuf::from(required(&flags, "root")?), &PathBuf::from(required(&flags, "out")?)),
+        "e6-compare" => e6_compare::run(&PathBuf::from(required(&flags, "dir")?), required(&flags, "rung")?),
+        "e6-summarize" => e6_summarize::run(&PathBuf::from(required(&flags, "dir")?), &PathBuf::from(required(&flags, "out")?)),
         "e4-diagnose" => e4_diagnose::run(&PathBuf::from(required(&flags, "dir")?), number(&flags, "step", "89")?, &PathBuf::from(required(&flags, "out")?)),
         other => Err(format!("unknown command '{other}'")),
     }

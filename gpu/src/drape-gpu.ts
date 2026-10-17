@@ -3,6 +3,7 @@ import type { DrapeProblem } from "./drape.ts";
 import type { KernelSources } from "./kernels.ts";
 import type { NewtonGpu } from "./newton.ts";
 import type { Problem } from "./problem.ts";
+import { prepareReducers, type ReductionInputs, type Reducers } from "./reductions.ts";
 import { prepareSolver, type PreparedSolver } from "./solver.ts";
 
 const WORKGROUP = 256;
@@ -14,6 +15,9 @@ export interface DrapeGpu<A, K> extends NewtonGpu<A, K> {
   readonly colliders: A;
   readonly bounds: A;
   readonly rowMass: A;
+  readonly distances: A;
+  /** GPU reductions for Experiment 6; null unless requested. */
+  readonly reducers: Reducers<A, K> | null;
   readonly ccd: readonly Dispatch<K>[];
   readonly elemGrad: A;
   readonly elemHess: A;
@@ -28,7 +32,7 @@ interface DrapeArrays<A> {
   readonly rowVertex: A; readonly rowMass: A; readonly dofMask: A;
   readonly blockPtr: A; readonly blockIdx: A; readonly forcePtr: A; readonly forceIdx: A;
   readonly elemGrad: A; readonly elemHess: A; readonly elemDelta: A; readonly regularization: A;
-  readonly colliders: A; readonly bounds: A;
+  readonly colliders: A; readonly bounds: A; readonly distances: A;
 }
 
 /** Offsets (in floats) of the hinge and inertia sections behind the membrane entries of the shared local arrays. */
@@ -69,7 +73,7 @@ function drapeArrays<A, K>(backend: Backend<A, K>, problem: DrapeProblem): Drape
     elemHess: scratch("elem_hess", 81 * m.triangles + 144 * m.hinges + 9 * m.rows),
     elemDelta: scratch("elem_delta", m.triangles + m.hinges + m.rows),
     regularization: backend.array("regularization", new Float32Array(1), "read"),
-    colliders: backend.array("colliders", Float32Array.from(problem.contact.colliders), "read"), bounds: scratch("ccd_bounds", m.rows),
+    colliders: backend.array("colliders", Float32Array.from(problem.contact.colliders), "read"), bounds: scratch("ccd_bounds", m.rows), distances: scratch("ccd_distances", m.rows),
   };
 }
 
@@ -124,7 +128,7 @@ function ccdSpec<A>(sources: KernelSources, problem: DrapeProblem, a: DrapeArray
   const keep = problem.manifest.keep_fraction;
   if (problem.contact.count > 0 && !Number.isFinite(keep)) throw new Error("problem.json: colliders without contact.keep_fraction");
   return { label: "ccd", source: sources.ccd, constants: problem.contact.count > 0 ? { KEEP: keep } : {},
-    bindings: { positions: a.positions, direction: a.direction, row_vertex: a.rowVertex, colliders: a.colliders, bounds: a.bounds } };
+    bindings: { positions: a.positions, direction: a.direction, row_vertex: a.rowVertex, colliders: a.colliders, bounds: a.bounds, distances: a.distances } };
 }
 
 /** Elements, hinges, rows: the workgroup counts of the three kinds of kernel. */
@@ -134,7 +138,7 @@ function workgroups(problem: DrapeProblem): { readonly elements: number; readonl
 }
 
 /** `projected` picks the simulation tangent (clamped membrane + Gauss–Newton hinge); it defaults to the problem's own kind. */
-export async function prepareDrapeGpu<A, K>(backend: Backend<A, K>, problem: DrapeProblem, sources: KernelSources, projected = problem.manifest.tangent === "projected"): Promise<DrapeGpu<A, K>> {
+export async function prepareDrapeGpu<A, K>(backend: Backend<A, K>, problem: DrapeProblem, sources: KernelSources, projected = problem.manifest.tangent === "projected", withReducers = false): Promise<DrapeGpu<A, K>> {
   const solver = await prepareSolver(backend, linearProblem(problem), sources);
   const a = drapeArrays(backend, problem);
   const specs = [membraneSpec(sources, problem, a, projected), hingeSpec(sources, problem, a, !projected), inertiaSpec(sources, problem, a),
@@ -144,8 +148,9 @@ export async function prepareDrapeGpu<A, K>(backend: Backend<A, K>, problem: Dra
   const [membrane, hinge, inertia, matrix, force, membraneDelta, hingeDelta, inertiaDelta, membraneExact, hingeExact, membraneProjected, hingeGaussNewton, ccd] =
     await Promise.all(specs.map((spec) => backend.kernel(spec)));
   const n = workgroups(problem);
+  const reducers = withReducers ? await prepareReducers(backend, sources, reductionInputs(solver, a, problem)) : null;
   return {
-    backend, solver, positions: a.positions, xHat: a.xHat, regularization: a.regularization, colliders: a.colliders, bounds: a.bounds, rowMass: a.rowMass, direction: a.direction, step: a.step, elemGrad: a.elemGrad, elemHess: a.elemHess, elemDelta: a.elemDelta,
+    backend, solver, positions: a.positions, xHat: a.xHat, regularization: a.regularization, colliders: a.colliders, bounds: a.bounds, rowMass: a.rowMass, distances: a.distances, reducers, direction: a.direction, step: a.step, elemGrad: a.elemGrad, elemHess: a.elemHess, elemDelta: a.elemDelta,
     evaluate: [{ kernel: membrane, workgroups: n.elements }, { kernel: hinge, workgroups: n.hinges }, { kernel: inertia, workgroups: n.rows },
       { kernel: matrix, workgroups: n.rows }, { kernel: force, workgroups: n.rows }],
     energyChange: [{ kernel: membraneDelta, workgroups: n.elements }, { kernel: hingeDelta, workgroups: n.hinges }, { kernel: inertiaDelta, workgroups: n.rows }],
@@ -154,4 +159,10 @@ export async function prepareDrapeGpu<A, K>(backend: Backend<A, K>, problem: Dra
     exactElements: [{ kernel: membraneExact, workgroups: n.elements }, { kernel: hingeExact, workgroups: n.hinges }],
     projectedElements: [{ kernel: membraneProjected, workgroups: n.elements }, { kernel: hingeGaussNewton, workgroups: n.hinges }],
   };
+}
+
+function reductionInputs<A, K>(solver: PreparedSolver<A, K>, a: DrapeArrays<A>, problem: DrapeProblem): ReductionInputs<A> {
+  const m = problem.manifest;
+  return { rhs: solver.arrays.rhs, solution: solver.arrays.x, deltas: a.elemDelta, bounds: a.bounds, distances: a.distances,
+    deltaLength: m.triangles + m.hinges + m.rows, vectorLength: 3 * m.rows, rows: m.rows };
 }

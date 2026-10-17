@@ -15,6 +15,8 @@ export const KERNEL_FILES = {
   inertia: { file: "inertia.wgsl", header: "contact.wgsl" },
   inertia_energy_change: { file: "inertia_energy_change.wgsl", header: "contact.wgsl" },
   ccd: { file: "ccd.wgsl", header: "contact.wgsl" },
+  sums: { file: "sums.wgsl", header: null },
+  argmin: { file: "argmin.wgsl", header: null },
 } as const;
 
 export type KernelName = keyof typeof KERNEL_FILES;

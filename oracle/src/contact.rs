@@ -148,6 +148,22 @@ impl Contact {
         self.colliders.iter().map(|c| c.max_step(x, p)).fold(1.0, f64::min)
     }
 
+    /// α_max and the collider that sets it (None when no collider limits the step).
+    pub fn max_step_limited(&self, x: Vec3, p: Vec3) -> (f64, Option<usize>) {
+        self.colliders.iter().enumerate().fold((1.0, None), |(alpha, at), (k, c)| {
+            let step = c.max_step(x, p);
+            if step < alpha { (step, Some(k)) } else { (alpha, at) }
+        })
+    }
+
+    /// |x − c|/d for the sphere, 1 for the plane: how much the f32 error of |x − c| is magnified in d.
+    pub fn distance_condition(&self, k: usize, x: Vec3) -> f64 {
+        match self.colliders[k] {
+            Collider::Plane { .. } => 1.0,
+            Collider::Sphere { centre, .. } => length(sub(x, centre)) / self.colliders[k].distance(x),
+        }
+    }
+
     /// Smallest distance to any collider (∞ without colliders).
     pub fn min_distance(&self, x: Vec3) -> f64 {
         self.colliders.iter().map(|c| c.distance(x)).fold(f64::INFINITY, f64::min)

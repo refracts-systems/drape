@@ -169,7 +169,7 @@ pub fn line_search<S: NewtonSystem>(system: &S, x: &[Vec3], gradient: &[f64], di
 /// A system whose tangent can be shifted by μ times its inertia (M/h² for the drape).
 pub trait RegularizedSystem: NewtonSystem {
     fn regularized_tangent(&self, x: &[Vec3], mu: f64) -> Bsr;
-    /// Rounding floor of ‖∇Φ‖: ε64·‖Σ_c |g_c|‖₂, the per-entry sum of absolute contributions to ∇Φ.
+    /// Rounding floor of ‖∇Φ‖: ε64·(‖Σ_c |g_c|‖₂ + ‖|K|·|x|‖₂): absolute contributions to ∇Φ plus the position rounding.
     fn residual_floor(&self, x: &[Vec3]) -> f64;
 }
 

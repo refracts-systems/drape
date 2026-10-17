@@ -1,9 +1,10 @@
 import { numbers } from "./coupon.ts";
 import { isObject } from "./problem.ts";
 import {
-  advance, assemble, dot32, lineSearch, linearStatus, norm32, record, scatter, STEP_STATUS, terminal,
+  advance, linearStatus, record, scatter, STEP_STATUS, terminal,
   type IterationRecord, type NewtonContext, type NewtonGpu, type StepStatus,
 } from "./newton.ts";
+import { searchStep, type NewtonOps, type NoisySearch, type Residual, type Slope, type Trial } from "./newton-ops.ts";
 import { solveOnce, type SolveRun } from "./solver.ts";
 import { inPhase, type PhaseClock } from "./timed-backend.ts";
 
@@ -21,11 +22,15 @@ export function parseRobustRules(text: string): RobustRules {
   return { ...numbers(robust, RULE_KEYS, "robust"), resolution_factor: typeof factor === "number" ? factor : 0 };
 }
 
-/** Ablation switches: floor-aware stop, Eisenstat–Walker forcing, K + μ·M/h² regularisation. */
+/** Ablation switches: floor-aware stop, Eisenstat–Walker forcing, K + μ·M/h² regularisation, and (Experiment 6) the noise-aware
+ * line search, GPU reductions and GPU-side bound/distance minima. The last two choose the `ops` and contact hooks at setup. */
 export interface RobustSettings {
   readonly floorStop: boolean;
   readonly forcing: boolean;
   readonly regularize: boolean;
+  readonly noiseAware?: boolean;
+  readonly gpuReductions?: boolean;
+  readonly fewReadbacks?: boolean;
 }
 
 /** What each iterate's decision rested on, recorded next to its IterationRecord for the oracle to replay. */
@@ -39,6 +44,13 @@ export interface RobustRecord {
   readonly alphaMax: number;
   readonly limitingVertex: number;
   readonly minDistance: number;
+  readonly deltaSum: number;
+  readonly deltaAbs: number;
+  readonly noiseOnly: number;
+  readonly slope: number;
+  readonly slopeExact: number;
+  readonly normSquared: number;
+  readonly normSquaredExact: number;
 }
 
 export interface RobustGpu<A, K> extends NewtonGpu<A, K> {
@@ -50,7 +62,7 @@ export interface ContactHooks {
   /** α_max and its limiting vertex for the positions and direction currently on the GPU. */
   readonly maxStep: () => Promise<{ readonly alpha: number; readonly vertex: number }>;
   /** Smallest collider distance over the unknowns, in f64 from the f32 positions. */
-  readonly minDistance: (positions: Float32Array) => number;
+  readonly minDistance: (positions: Float32Array<ArrayBuffer>) => Promise<number>;
 }
 
 export interface RobustContext<A, K> extends NewtonContext<A, K> {
@@ -62,6 +74,11 @@ export interface RobustContext<A, K> extends NewtonContext<A, K> {
   readonly contact: ContactHooks | null;
   /** Probes only: x_k and the scattered direction p_k of every update, for the oracle's α_max replay. */
   readonly directions: Float32Array<ArrayBuffer>[] | null;
+  readonly ops: NewtonOps;
+  /** Probes only: every tried step length of every line search, for the oracle's acceptance replay. */
+  readonly trials: TrialRecord[] | null;
+  /** x before and after every noise-only accepted update (n ≤ 65): the oracle evaluates f64 Φ across them. */
+  readonly noiseStates: Float32Array<ArrayBuffer>[] | null;
 }
 
 /** Newton state carried across the iterations of one time step. */
@@ -93,17 +110,25 @@ function writeMu<A, K>(context: RobustContext<A, K>, mu: number): void {
   if (context.settings.regularize) context.gpu.backend.write(context.gpu.regularization, Float32Array.of(mu));
 }
 
+/** A tried step length with where it was tried. */
+export interface TrialRecord extends Trial {
+  readonly step: number;
+  readonly iteration: number;
+  readonly halving: number;
+}
+
 /** PCG direction for the current μ; under regularisation μ rises (with reassembly) on breakdown or non-descent, null at the cap. */
-async function solveDirection<A, K>(context: RobustContext<A, K>, positions: Float32Array<ArrayBuffer>, rhs: Float32Array, state: StepState): Promise<{ readonly run: SolveRun; readonly retries: number } | null> {
+async function solveDirection<A, K>(context: RobustContext<A, K>, positions: Float32Array<ArrayBuffer>, state: StepState): Promise<{ readonly run: SolveRun; readonly retries: number; readonly slope: Slope } | null> {
   const settings = { tolerance: state.eta, maxIterations: context.model.pcg.max_iterations, chunkIterations: CHUNK_ITERATIONS };
   for (let retries = 0; ; retries += 1) {
     const run = await inPhase(context.clock, "pcg", () => solveOnce(context.gpu.solver, settings));
-    const failed = run.status === "breakdown" || !(-dot32(rhs, run.solution) < 0);
-    if (!failed || !context.settings.regularize) return { run, retries };
+    const slope = await context.ops.slope(run.solution);
+    const failed = run.status === "breakdown" || !(slope.value < 0);
+    if (!failed || !context.settings.regularize) return { run, retries, slope };
     if (state.mu >= context.rules.mu_cap) return null;
     state.mu = raiseMu(context.rules, state.mu);
     writeMu(context, state.mu);
-    await inPhase(context.clock, "assembly", () => assemble(context.gpu, positions));
+    await context.ops.residual(positions);
   }
 }
 
@@ -133,8 +158,10 @@ function forcingFor<A, K>(context: RobustContext<A, K>, state: StepState, norm: 
   return iteration === 0 ? context.rules.eta_start : nextForcing(context.rules, state.eta, f32(norm / state.previousNorm));
 }
 
-const emptyExtra = (state: StepState): RobustRecord =>
-  ({ eta: Number.NaN, mu: state.mu, updateInf: Number.NaN, stepInf: Number.NaN, retries: 0, resolution: Number.NaN, alphaMax: Number.NaN, limitingVertex: Number.NaN, minDistance: Number.NaN });
+const NAN = Number.NaN;
+
+const emptyExtra = (state: StepState): RobustRecord => ({ eta: NAN, mu: state.mu, updateInf: NAN, stepInf: NAN, retries: 0, resolution: NAN, alphaMax: NAN, limitingVertex: NAN, minDistance: NAN,
+  deltaSum: NAN, deltaAbs: NAN, noiseOnly: NAN, slope: NAN, slopeExact: NAN, normSquared: NAN, normSquaredExact: NAN });
 
 const NO_LIMIT = { alpha: 1, vertex: -1 } as const;
 
@@ -152,22 +179,49 @@ async function finish<A, K>(context: RobustContext<A, K>, where: { readonly step
   pushRecord(context, terminal(where.step, where.iteration, relative, status), emptyExtra(state), positions);
 }
 
+/** Where an update happens: step, iteration, relative residual, the residual measurement and x_n. */
+interface Where {
+  readonly step: number;
+  readonly iteration: number;
+  readonly relative: number;
+  readonly residual: Residual;
+  readonly origin: Float32Array;
+}
+
+function searchOptions<A, K>(context: RobustContext<A, K>, where: Where): { readonly noiseAware: boolean; readonly onTrial: ((trial: Trial) => void) | null } {
+  const trials = context.trials;
+  const counter = { halving: 0 };
+  return { noiseAware: context.settings.noiseAware === true,
+    onTrial: trials === null ? null : (trial) => { trials.push({ ...trial, step: where.step, iteration: where.iteration, halving: counter.halving }); counter.halving += 1; } };
+}
+
+/** The robust record of one accepted (or failed) update, with everything the oracle replays. */
+async function recordOf<A, K>(context: RobustContext<A, K>, found: { readonly search: NoisySearch | null; readonly updateInf: number; readonly limit: { readonly alpha: number; readonly vertex: number } },
+  solved: { readonly retries: number; readonly slope: Slope }, state: StepState, where: Where, positions: Float32Array<ArrayBuffer>): Promise<RobustRecord> {
+  const { search, updateInf, limit } = found;
+  return { eta: state.eta, mu: state.mu, updateInf, stepInf: stepInf(context, positions, where.origin), retries: solved.retries, resolution: resolutionOf(context, positions),
+    alphaMax: limit.alpha, limitingVertex: limit.vertex, minDistance: (await context.contact?.minDistance(positions)) ?? NAN,
+    deltaSum: search?.sum ?? NAN, deltaAbs: search?.abs ?? NAN, noiseOnly: search === null ? NAN : Number(search.noiseOnly),
+    slope: solved.slope.value, slopeExact: solved.slope.exact, normSquared: where.residual.normSquared, normSquaredExact: where.residual.normSquaredExact };
+}
+
 /** One update: direction, line search, records; returns the accepted update's robust record, or null when the step ends. */
-async function update<A, K>(context: RobustContext<A, K>, positions: Float32Array<ArrayBuffer>, rhs: Float32Array, state: StepState, where: { readonly step: number; readonly iteration: number; readonly relative: number; readonly origin: Float32Array }): Promise<RobustRecord | null> {
-  const solved = await solveDirection(context, positions, rhs, state);
+async function update<A, K>(context: RobustContext<A, K>, positions: Float32Array<ArrayBuffer>, state: StepState, where: Where): Promise<RobustRecord | null> {
+  const solved = await solveDirection(context, positions, state);
   if (solved === null) {
     await finish(context, where, where.relative, STEP_STATUS.regularization_cap, state, positions);
     return null;
   }
   const direction = solved.run.solution;
   const limit = await startStep(context, positions, direction);
-  const search = await inPhase(context.clock, "line_search", () => lineSearch(context, -dot32(rhs, direction), limit.alpha));
+  const search = await inPhase(context.clock, "line_search", () => searchStep(context.ops, context.model, solved.slope.value, limit.alpha, searchOptions(context, where)));
   const updateInf = search === null ? Number.NaN : search.stepLength * infNorm(direction);
   const entry: IterationRecord = { step: where.step, iteration: where.iteration, relativeResidual: where.relative, pcgIterations: solved.run.iterations, pcgStatus: linearStatus(solved.run),
     linearResidual: solved.run.gpuTrueRelativeResidual, stepLength: search?.stepLength ?? Number.NaN, halvings: search?.halvings ?? Number.NaN, status: search === null ? STEP_STATUS.line_search_failed : STEP_STATUS.running };
+  const before = search?.noiseOnly === true && context.noiseStates !== null ? Float32Array.from(positions) : null;
   if (search !== null) advance(context.model, positions, direction, search.stepLength);
-  const extra: RobustRecord = { eta: state.eta, mu: state.mu, updateInf, stepInf: stepInf(context, positions, where.origin), retries: solved.retries, resolution: resolutionOf(context, positions),
-    alphaMax: limit.alpha, limitingVertex: limit.vertex, minDistance: context.contact?.minDistance(positions) ?? Number.NaN };
+  if (before !== null) context.noiseStates?.push(before, Float32Array.from(positions));
+  const extra = await recordOf(context, { search, updateInf, limit }, solved, state, where, positions);
   pushRecord(context, entry, extra, positions);
   if (search !== null && context.settings.regularize) state.mu = search.halvings === 0 ? relaxMu(context.rules, state.mu) : state.mu;
   return search === null ? null : extra;
@@ -178,16 +232,16 @@ export async function solveStepRobust<A, K>(context: RobustContext<A, K>, positi
   const state: StepState = { mu: 0, eta: context.rules.eta_start, previousNorm: Number.NaN };
   for (let iteration = 0; ; iteration += 1) {
     writeMu(context, state.mu);
-    const rhs = await inPhase(context.clock, "assembly", () => assemble(context.gpu, positions));
-    const norm = norm32(rhs);
+    const residual = await context.ops.residual(positions);
+    const norm = residual.norm;
     const relative = f32(norm / scale);
-    const where = { step, iteration, relative, origin };
+    const where = { step, iteration, relative, residual, origin };
     if (relative <= context.model.newton.tolerance || iteration === context.model.newton.max_iterations) {
       return finish(context, where, relative, relative <= context.model.newton.tolerance ? STEP_STATUS.converged : STEP_STATUS.iteration_limit, state, positions);
     }
     state.eta = forcingFor(context, state, norm, iteration);
     state.previousNorm = norm;
-    const extra = await update(context, positions, rhs, state, where);
+    const extra = await update(context, positions, state, where);
     if (extra === null) return;
     if (context.settings.floorStop && updateIsSmall(context.rules, extra)) {
       return finishByUpdate(context, { step, iteration: iteration + 1 }, scale, state, positions);
@@ -197,6 +251,6 @@ export async function solveStepRobust<A, K>(context: RobustContext<A, K>, positi
 
 async function finishByUpdate<A, K>(context: RobustContext<A, K>, where: { readonly step: number; readonly iteration: number }, scale: number, state: StepState, positions: Float32Array<ArrayBuffer>): Promise<void> {
   writeMu(context, state.mu);
-  const rhs = await inPhase(context.clock, "assembly", () => assemble(context.gpu, positions));
-  return finish(context, where, f32(norm32(rhs) / scale), STEP_STATUS.update_rule, state, positions);
+  const residual = await context.ops.residual(positions);
+  return finish(context, where, f32(residual.norm / scale), STEP_STATUS.update_rule, state, positions);
 }

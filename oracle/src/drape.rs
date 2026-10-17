@@ -224,6 +224,31 @@ impl DrapeStep<'_> {
         inertia + self.drape.potential(x)
     }
 
+    /// Φ restricted to what a perturbation of the vertices in `patch` can change: their inertia and barrier terms and the
+    /// membranes and hinges that touch them. Differences of it equal differences of Φ without the rounding of the global sum.
+    pub fn local_value(&self, x: &[Vec3], patch: &[usize]) -> f64 {
+        let mut touched = vec![false; self.drape.mesh.rest.len()];
+        patch.iter().for_each(|&i| touched[i] = true);
+        let drape = self.drape;
+        let inertia: f64 = patch.iter().map(|&i| {
+            let offset: Vec3 = std::array::from_fn(|k| x[i][k] - self.x_hat[i][k]);
+            0.5 * drape.mass_over_h2(i) * dot(offset, offset) + drape.contact.energy(x[i])
+        }).sum();
+        let membrane: f64 = drape.membranes.iter().filter(|e| e.vertices.iter().any(|&v| touched[v])).map(|e| e.energy(x, &drape.material)).sum();
+        inertia + membrane + drape.hinges.iter().filter(|h| h.vertices.iter().any(|&v| touched[v])).map(|h| h.energy(x)).sum::<f64>()
+    }
+
+    /// α_max (the minimum over free vertices) with its limiting vertex and collider, for the replay tolerance.
+    pub fn max_step_detail(&self, x: &[Vec3], d: &[Vec3]) -> (f64, Option<(usize, usize)>) {
+        self.drape.free.iter().fold((1.0, None), |(alpha, at), &i| {
+            let (step, collider) = self.drape.contact.max_step_limited(x[i], d[i]);
+            match collider {
+                Some(k) if step < alpha => (step, Some((i, k))),
+                _ => (alpha, at),
+            }
+        })
+    }
+
     /// Σ over free vertices of b(d(x + αd)) − b(d(x)), per vertex as the WGSL kernel forms it.
     pub fn barrier_change(&self, x: &[Vec3], d: &[Vec3], alpha: f64) -> f64 {
         let contact = &self.drape.contact;
@@ -290,11 +315,19 @@ impl RegularizedSystem for DrapeStep<'_> {
     }
 
     fn residual_floor(&self, x: &[Vec3]) -> f64 {
-        f64::EPSILON * vector_norm(&self.absolute_contributions(x))
+        f64::EPSILON * (vector_norm(&self.absolute_contributions(x)) + vector_norm(&self.stiffness_times_positions(x)))
     }
 }
 
 impl DrapeStep<'_> {
+    /// |K|·|x|: the entrywise absolute tangent (μ = 0) times the absolute unknown positions, i.e. the force error that the
+    /// rounding of the positions themselves produces.
+    pub fn stiffness_times_positions(&self, x: &[Vec3]) -> Vec<f64> {
+        let mut tangent = self.tangent(x);
+        tangent.vals.iter_mut().for_each(|v| *v = v.abs());
+        tangent.multiply(&self.gather(x).iter().map(|v| v.abs()).collect::<Vec<f64>>())
+    }
+
     /// Per unknown: |inertia| + Σ|membrane| + Σ|hinge| + |barrier| contributions to ∇Φ.
     pub fn absolute_contributions(&self, x: &[Vec3]) -> Vec<f64> {
         let drape = self.drape;

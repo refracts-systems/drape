@@ -35,6 +35,12 @@ pub struct Iterate {
     pub resolution: f64,
     pub alpha_max: f64,
     pub min_distance: f64,
+    pub delta_abs: f64,
+    pub noise_only: f64,
+    pub slope: f64,
+    pub slope_exact: f64,
+    pub norm_squared: f64,
+    pub norm_squared_exact: f64,
 }
 
 fn read_f64_rows(path: &Path, width: usize) -> Result<Vec<Vec<f64>>, String> {
@@ -61,7 +67,8 @@ pub fn read_iterates(dir: &Path, prefix: &str) -> Result<Vec<Iterate>, String> {
     Ok(records.iter().zip(&extras).map(|(r, e)| Iterate {
         step: r[0] as usize, relative: r[2], pcg_iterations: r[3], status: r[8], eta: pick(e, "eta"), mu: pick(e, "mu"), update_inf: pick(e, "updateInf"),
         step_inf: pick(e, "stepInf"), retries: pick(e, "retries"), resolution: pick(e, "resolution"), alpha_max: pick(e, "alphaMax"),
-        min_distance: pick(e, "minDistance"),
+        min_distance: pick(e, "minDistance"), delta_abs: pick(e, "deltaAbs"), noise_only: pick(e, "noiseOnly"),
+        slope: pick(e, "slope"), slope_exact: pick(e, "slopeExact"), norm_squared: pick(e, "normSquared"), norm_squared_exact: pick(e, "normSquaredExact"),
     }).collect())
 }
 
@@ -127,8 +134,19 @@ pub fn oracle_stats(dir: &Path) -> Result<OracleStats, String> {
     let array = |name: &str| locate(&manifest, name).map(|(offset, length)| read_f64(&bytes, offset, length));
     let (iterations, converged, caps) = (array("newton_iterations")?, array("converged")?, array("mu_cap_hit")?);
     let mean = iterations.iter().sum::<f64>() / iterations.len() as f64;
-    let at_floor = array("converged_at_floor").map_or(0.0, |a| a.iter().sum());
-    Ok(OracleStats { mean, unconverged: iterations.len() as f64 - converged.iter().sum::<f64>(), at_floor, caps: caps.iter().sum() })
+    let (unconverged, at_floor) = convergence_counts(dir, &iterations, &converged, array("converged_at_floor").map_or(0.0, |a| a.iter().sum()))?;
+    Ok(OracleStats { mean, unconverged, at_floor, caps: caps.iter().sum() })
+}
+
+/// (unconverged, converged at the floor). References of E4-final and E5 (problem.json robust.resolution_factor > 0) are
+/// classified with the measured floor of Experiment 6 (e6_rescore); older references use the stored flags.
+fn convergence_counts(dir: &Path, iterations: &[f64], converged: &[f64], stored_at_floor: f64) -> Result<(f64, f64), String> {
+    let problem = fs::read_to_string(dir.join("problem.json")).map_err(|e| e.to_string())?;
+    if number(&problem, "robust", "resolution_factor") > 0.0 {
+        let c = crate::e6_rescore::classify(dir)?;
+        return Ok((c.failing.len() as f64, c.by_floor as f64));
+    }
+    Ok((iterations.len() as f64 - converged.iter().sum::<f64>(), stored_at_floor))
 }
 
 /// Per-step GPU statistics of one rung's trajectory.
@@ -184,7 +202,7 @@ pub fn robust_json(t: &Trajectory, gpu: &str) -> Json {
         .number("max_mu", t.max_mu)
         .number("ms_per_step", number(gpu, "", "ms_per_step"))
         .raw("phase_ms_per_step", Json::new().number("assembly", number(gpu, "phase_ms_per_step", "assembly")).number("pcg", number(gpu, "phase_ms_per_step", "pcg"))
-            .number("line_search", number(gpu, "phase_ms_per_step", "line_search")).number("ccd", number(gpu, "phase_ms_per_step", "ccd")).number("io", number(gpu, "phase_ms_per_step", "io"))
+            .number("line_search", number(gpu, "phase_ms_per_step", "line_search")).number("ccd", number(gpu, "phase_ms_per_step", "ccd")).number("reduce", number(gpu, "phase_ms_per_step", "reduce")).number("io", number(gpu, "phase_ms_per_step", "io"))
             .number("other", number(gpu, "phase_ms_per_step", "other")).render())
 }
 

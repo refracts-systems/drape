@@ -1,6 +1,7 @@
 // Per unknown row: the largest α ∈ (0, 1] with d(x + αp) ≥ KEEP·d(x) for every collider (contact.wgsl); the host takes the
 // minimum over rows as the line-search start α_max. Plane: linear root. Sphere: |q + αp| = w + KEEP·d0, smallest positive root
 // of a·α² + b·α + c with c = (1 − KEEP)·d0·(|q| + w + KEEP·d0), in the cancellation-free form 2c / (−b + √disc).
+// distances[row] is the smallest distance of the vertex to any collider (Experiment 6 reads its minimum).
 override KEEP: f32 = 0.1;
 
 @group(0) @binding(0) var<storage, read> positions: array<f32>;
@@ -8,6 +9,7 @@ override KEEP: f32 = 0.1;
 @group(0) @binding(2) var<storage, read> row_vertex: array<u32>;
 @group(0) @binding(3) var<storage, read> colliders: array<f32>;
 @group(0) @binding(4) var<storage, read_write> bounds: array<f32>;
+@group(0) @binding(5) var<storage, read_write> distances: array<f32>;
 
 fn sphere_step(k: u32, x: vec3f, p: vec3f, d0: f32) -> f32 {
   let q = x - collider_point(k);
@@ -44,8 +46,11 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
   let x = vec3f(positions[3u * v], positions[3u * v + 1u], positions[3u * v + 2u]);
   let p = vec3f(direction[3u * v], direction[3u * v + 1u], direction[3u * v + 2u]);
   var alpha = 1.0;
+  var nearest = 3.0e38;
   for (var k = 0u; k < collider_count(); k = k + 1u) {
     alpha = min(alpha, collider_step(k, x, p));
+    nearest = min(nearest, proximity(k, x).distance);
   }
   bounds[row] = alpha;
+  distances[row] = nearest;
 }
