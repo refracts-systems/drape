@@ -1,6 +1,6 @@
-# Seri Belajar: Jersey Engine, dari Nol sampai Step 5
+# Seri Belajar: Jersey Engine, dari Nol sampai Step 6
 
-Seri ini menjelaskan **setiap file** yang dikerjakan di Step 1 (Experiment 1), Step 2 (Experiment 2), Step 3 (Experiment 3), Step 4 (Experiment 4), dan Step 5 (Experiment 5) proyek `jersey-engine`.
+Seri ini menjelaskan **setiap file** yang dikerjakan di Step 1 (Experiment 1), Step 2 (Experiment 2), Step 3 (Experiment 3), Step 4 (Experiment 4), Step 5 (Experiment 5), dan Step 6 (Experiment 6) proyek `jersey-engine`.
 Penulisnya mengasumsikan kamu adalah **backend developer**: paham bahasa pemrograman, API, thread, antrean job, database, dan JSON, tetapi
 **belum pernah menulis kode GPU (WGSL / WebGPU)** dan tidak berlatar belakang komputasi numerik atau mekanika.
 
@@ -34,7 +34,8 @@ jersey-engine/
 ├── run-e2.sh      menjalankan Step 2 dari ujung ke ujung
 ├── run-e3.sh      menjalankan Step 3 dari ujung ke ujung
 ├── run-e4.sh      menjalankan Step 4 (ablation A–D) dari ujung ke ujung
-└── run-e5.sh      menjalankan Step 5 (E4-final + kontak) dari ujung ke ujung
+├── run-e5.sh      menjalankan Step 5 (E4-final + kontak) dari ujung ke ujung
+└── run-e6.sh      menjalankan Step 6 (aturan pengukuran + tangga A–D) dari ujung ke ujung
 ```
 
 ## Daftar isi
@@ -152,6 +153,19 @@ jersey-engine/
 | 5.10 | [robust-newton.ts, contact-host.ts, drape-e4.ts](step_5/step_5_10_robust_newton_ts_contact_host_ts_drape_e4_ts.md) | Newton host dengan kontak |
 | 5.11 | [run-e5.ts, run-e5.sh dan hasil](step_5/step_5_11_run_e5_ts_run_e5_sh_dan_hasil.md) | Semua angka, gate, trigger, regresi |
 
+### Step 6: Newton kontak yang jujur tentang lantai f32 (Experiment 6)
+
+| No | File | Isi |
+|---|---|---|
+| 6.0 | [gambaran besar](step_6/step_6_0_gambaran_besar.md) | Part 0 (aturan pengukuran), Part 1 (tangga A–D), hasil singkat |
+| 6.1 | [oracle: aturan pengukuran](step_6/step_6_1_oracle_pengukuran_part0.md) | toleransi α_max, FD patch, lantai f64, re-score |
+| 6.2 | [sums.wgsl, argmin.wgsl](step_6/step_6_2_sums_argmin_wgsl.md) | reduksi dua lintasan di GPU |
+| 6.3 | [ccd.wgsl, timed-backend.ts](step_6/step_6_3_ccd_wgsl_timed_backend_ts.md) | jarak per baris, penghitung byte baca |
+| 6.4 | [newton-ops.ts](step_6/step_6_4_newton_ops_ts.md) | host vs GPU, line search sadar noise |
+| 6.5 | [robust-newton.ts, drape-e4.ts, contact-host.ts, run-e6.ts](step_6/step_6_5_robust_newton_drape_e4_contact_host_ts.md) | merangkai rung, median run |
+| 6.6 | [e6_compare.rs, e6_summarize.rs](step_6/step_6_6_e6_compare_e6_summarize_rs.md) | replay penerimaan, trigger, rung final |
+| 6.7 | [run-e6.sh dan hasil](step_6/step_6_7_run_e6_sh_dan_hasil.md) | semua angka, gate, regresi |
+
 ## Glosarium cepat
 
 | Istilah | Arti singkat | Analogi backend |
@@ -172,3 +186,5 @@ jersey-engine/
 | Gate | Syarat lulus/gagal yang ditetapkan sebelum mengukur | SLO / acceptance criteria |
 | Barrier | Energi yang naik tanpa batas saat mendekati permukaan | Back-pressure yang makin keras saat antrean hampir penuh |
 | CCD | Batas langkah supaya titik tidak melompati permukaan | Rate limiter yang menjamin tidak ada lompatan melewati batas |
+| Reduksi | Menggabungkan banyak angka menjadi satu (jumlah, minimum) | map-reduce: ringkasan per shard, lalu satu reducer |
+| Median dari beberapa run | Waktu yang dilaporkan dari run bernilai tengah | benchmark yang diulang dan urutannya diselang-seling |
