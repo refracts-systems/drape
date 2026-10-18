@@ -1,19 +1,12 @@
-oracle/target/
-gpu/node_modules/
-cases/*/*.bin
-cases-baseline/*/*.bin
-coupon/*/*.bin
-drape/*/*.bin
-drape4/*/*.bin
-drape4/*/*/*.bin
-drape4-final/*/*.bin
-drape4-final/*/*/*.bin
-drape4-final/generate.log
-drape5/*/*.bin
-drape5/*/*/*.bin
-drape5/*.log
-drape5/*.err
-oracle/target-dev/
-drape7/*/*/*.bin
-drape7/*/*.bin
-drape7/*/*/*/*.bin
+# Build outputs and dependencies
+engine/oracle/target/
+engine/oracle/target-dev/
+engine/gpu/node_modules/
+
+# Run data stays out of git (inputs/outputs of the GPU and oracle, several GB); the JSON summaries and logs are tracked
+experiments/*/*/*.bin
+experiments/*/*/*/*.bin
+experiments/*/*/*/*/*.bin
+experiments/drape4-final/generate.log
+experiments/drape5/*.log
+experiments/drape5/*.err

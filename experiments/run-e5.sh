@@ -8,14 +8,16 @@
 #   SIZES="33" GPU_ONLY="" ./run-e5.sh
 set -euo pipefail
 cd "$(dirname "$0")"
+ROOT="$(pwd -W 2>/dev/null || pwd)"
+ENGINE="$ROOT/../engine"
 
 SIZES="${SIZES:-33 65}"
 GPU_ONLY="${GPU_ONLY:-129}"
-ORACLE=./oracle/target/release/oracle
+ORACLE="$ENGINE/oracle/target/release/oracle"
 
 reference_flag() { [[ " $GPU_ONLY " == *" $1 "* ]] && echo false || echo true; }
 
-cargo build --release --manifest-path oracle/Cargo.toml
+cargo build --release --manifest-path "$ENGINE/oracle/Cargo.toml"
 if [ -f drape4/drape-n65/reference.bin ]; then
   "$ORACLE" e4-diagnose --dir drape4/drape-n65 --step 89 --out results/e4-step89-diagnosis.json > /dev/null
 fi
@@ -24,12 +26,12 @@ for n in $SIZES $GPU_ONLY; do
   [ -f "drape5/drape-n$n/problem.bin" ] || "$ORACLE" e5-generate --n "$n" --reference "$(reference_flag "$n")" --out "drape5/drape-n$n"
 done
 for n in $SIZES $GPU_ONLY; do
-  (cd gpu && node src/node/run-e4.ts --case "../drape4-final/drape-n$n" --rung D)
+  (cd "$ENGINE/gpu" && node src/node/run-e4.ts --case "$ROOT/drape4-final/drape-n$n" --rung D)
   "$ORACLE" e4-compare --dir "drape4-final/drape-n$n" --rung D > /dev/null
 done
 "$ORACLE" e4-summarize --dir drape4-final --out results/experiment4-final.json
 for n in $SIZES $GPU_ONLY; do
-  (cd gpu && node src/node/run-e5.ts --case "../drape5/drape-n$n")
+  (cd "$ENGINE/gpu" && node src/node/run-e5.ts --case "$ROOT/drape5/drape-n$n")
   "$ORACLE" e5-compare --dir "drape5/drape-n$n" > /dev/null
 done
 "$ORACLE" e5-summarize --dir drape5 --baseline results/experiment4-final.json --out results/experiment5-vgpu-hardware.json

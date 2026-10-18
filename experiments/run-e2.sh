@@ -4,18 +4,20 @@
 #   PATHS="patch uniaxial biaxial" SIZES="33 65" ./run-e2.sh hardware
 set -euo pipefail
 cd "$(dirname "$0")"
+ROOT="$(pwd -W 2>/dev/null || pwd)"
+ENGINE="$ROOT/../engine"
 
 ADAPTER="${1:-hardware}"
 PATHS="${PATHS:-patch uniaxial biaxial}"
 SIZES="${SIZES:-33 65}"
-ORACLE=./oracle/target/release/oracle
+ORACLE="$ENGINE/oracle/target/release/oracle"
 
-cargo build --release --manifest-path oracle/Cargo.toml
+cargo build --release --manifest-path "$ENGINE/oracle/Cargo.toml"
 for path in $PATHS; do
   for n in $SIZES; do
     dir="coupon/$path-n$n"
     [ -f "$dir/reference.bin" ] || "$ORACLE" e2-generate --path "$path" --n "$n" --out "$dir"
-    (cd gpu && node src/node/run-e2.ts --case "../$dir" --adapter "$ADAPTER")
+    (cd "$ENGINE/gpu" && node src/node/run-e2.ts --case "$ROOT/$dir" --adapter "$ADAPTER")
     "$ORACLE" e2-compare --dir "$dir" > /dev/null
   done
 done

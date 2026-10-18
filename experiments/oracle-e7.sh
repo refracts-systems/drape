@@ -5,11 +5,13 @@
 # Stored references are never regenerated. Progress of every solve is written to <dir>/<mode>.log.
 set -euo pipefail
 cd "$(dirname "$0")"
+ROOT="$(pwd -W 2>/dev/null || pwd)"
+ENGINE="$ROOT/../engine"
 
 SIZES="${SIZES-17 33}"
 GPU_ONLY="${GPU_ONLY-65 129}"
 EDITS="base w1 w2 w3"
-ORACLE=./oracle/target/release/oracle
+ORACLE="$ENGINE/oracle/target/release/oracle"
 
 generate() {
   for n in "$@"; do
@@ -37,7 +39,7 @@ size_chain() { # one size: base cold, then the three edits cold and warm in para
   wait
 }
 
-cargo build --release --manifest-path oracle/Cargo.toml
+cargo build --release --manifest-path "$ENGINE/oracle/Cargo.toml"
 generate $SIZES $GPU_ONLY
 for n in $SIZES; do size_chain "$n" & done
 wait

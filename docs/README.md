@@ -1,5 +1,7 @@
 # Seri Belajar: Jersey Engine, dari Nol sampai Step 7
 
+> Catatan: setelah restrukturisasi, `oracle/` dan `gpu/` ada di `engine/`, sedangkan data dan skrip eksperimen ada di `experiments/`. Path di dokumen step lama masih memakai tata letak sebelumnya.
+
 Seri ini menjelaskan **setiap file** yang dikerjakan di Step 1 (Experiment 1), Step 2 (Experiment 2), Step 3 (Experiment 3), Step 4 (Experiment 4), Step 5 (Experiment 5), dan Step 6 (Experiment 6) proyek `jersey-engine`.
 Penulisnya mengasumsikan kamu adalah **backend developer**: paham bahasa pemrograman, API, thread, antrean job, database, dan JSON, tetapi
 **belum pernah menulis kode GPU (WGSL / WebGPU)** dan tidak berlatar belakang komputasi numerik atau mekanika.

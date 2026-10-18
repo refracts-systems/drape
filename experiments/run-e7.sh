@@ -13,6 +13,8 @@
 #   STAGES="gpu" SIZES="17" GPU_ONLY="" REPEATS=1 REPEATS_EDITS=1 ./run-e7.sh
 set -euo pipefail
 cd "$(dirname "$0")"
+ROOT="$(pwd -W 2>/dev/null || pwd)"
+ENGINE="$ROOT/../engine"
 
 STAGES="${STAGES:-oracle gpu score}"
 SIZES="${SIZES-17 33}"
@@ -22,7 +24,7 @@ REPEATS_LARGE="${REPEATS_LARGE:-2}"
 REPEATS_EDITS="${REPEATS_EDITS:-2}"
 REPEATS_EDITS_LARGE="${REPEATS_EDITS_LARGE:-1}"
 EDITS="w1 w2 w3"
-ORACLE=./oracle/target/release/oracle
+ORACLE="$ENGINE/oracle/target/release/oracle"
 ALL="$SIZES $GPU_ONLY"
 
 large() { [[ " $GPU_ONLY " == *" $1 "* && "$1" == "129" ]]; }
@@ -31,7 +33,7 @@ gpu_run() { # case dir, mode, round, extra args...
   local dir="$1" mode="$2" round="$3"; shift 3
   local budget=""
   [[ "$dir" == *drape-n129* ]] && budget="${BUDGET_LARGE:-1200}"
-  (cd gpu && env ${budget:+E7_BUDGET_S=$budget} node src/node/run-e7.ts --case "../$dir" --mode "$mode" "$@")
+  (cd "$ENGINE/gpu" && env ${budget:+E7_BUDGET_S=$budget} node src/node/run-e7.ts --case "$ROOT/$dir" --mode "$mode" "$@")
   cp "$dir/gpu-$mode/gpu-result.json" "$dir/gpu-$mode/gpu-result-run$round.json"
 }
 
@@ -44,16 +46,16 @@ round_for_size() { # size, round
   [ "$round" -le "$edit_rounds" ] || return 0
   for edit in $EDITS; do
     gpu_run "drape7/drape-n$n/$edit" cold "$round"
-    gpu_run "drape7/drape-n$n/$edit" warm "$round" --start "../$base/gpu-cold/gpu-equilibrium"
+    gpu_run "drape7/drape-n$n/$edit" warm "$round" --start "$ROOT/$base/gpu-cold/gpu-equilibrium"
   done
   if [ -n "${previous:-}" ]; then
     "$ORACLE" e7-prolong --coarse "drape7/drape-n$previous/base/gpu-cold/gpu-equilibrium" --coarse-n "$previous" --fine-dir "$base" --out "$base/start-prolong-gpu" > /dev/null
-    gpu_run "$base" prolong "$round" --start "../$base/start-prolong-gpu"
+    gpu_run "$base" prolong "$round" --start "$ROOT/$base/start-prolong-gpu"
   fi
 }
 
 merge() { # case dir, mode
-  [ -f "$1/gpu-$2/gpu-result-run1.json" ] && (cd gpu && node src/node/merge-runs.ts --dir "../$1/gpu-$2") || true
+  [ -f "$1/gpu-$2/gpu-result-run1.json" ] && (cd "$ENGINE/gpu" && node src/node/merge-runs.ts --dir "$ROOT/$1/gpu-$2") || true
 }
 
 stage_gpu() {
@@ -85,7 +87,7 @@ stage_score() {
   "$ORACLE" e7-summarize --dir drape7 --out results/experiment7-vgpu-hardware.json
 }
 
-cargo build --release --manifest-path oracle/Cargo.toml
+cargo build --release --manifest-path "$ENGINE/oracle/Cargo.toml"
 for stage in $STAGES; do
   case "$stage" in
     oracle) SIZES="$SIZES" GPU_ONLY="$GPU_ONLY" ./oracle-e7.sh ;;

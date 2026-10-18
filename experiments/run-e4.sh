@@ -5,13 +5,15 @@
 #   RUNGS="D" SIZES="33" GPU_ONLY="" ./run-e4.sh
 set -euo pipefail
 cd "$(dirname "$0")"
+ROOT="$(pwd -W 2>/dev/null || pwd)"
+ENGINE="$ROOT/../engine"
 
 RUNGS="${RUNGS:-A B C D}"
 SIZES="${SIZES:-33 65}"
 GPU_ONLY="${GPU_ONLY:-129}"
-ORACLE=./oracle/target/release/oracle
+ORACLE="$ENGINE/oracle/target/release/oracle"
 
-cargo build --release --manifest-path oracle/Cargo.toml
+cargo build --release --manifest-path "$ENGINE/oracle/Cargo.toml"
 for n in $SIZES $GPU_ONLY; do
   dir="drape4/drape-n$n"
   reference=$([[ " $GPU_ONLY " == *" $n "* ]] && echo false || echo true)
@@ -20,7 +22,7 @@ done
 for rung in $RUNGS; do
   for n in $SIZES $GPU_ONLY; do
     dir="drape4/drape-n$n"
-    (cd gpu && node src/node/run-e4.ts --case "../$dir" --rung "$rung")
+    (cd "$ENGINE/gpu" && node src/node/run-e4.ts --case "$ROOT/$dir" --rung "$rung")
     "$ORACLE" e4-compare --dir "$dir" --rung "$rung" > /dev/null
   done
 done

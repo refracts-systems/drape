@@ -12,13 +12,15 @@
 #   RUNGS="A" SIZES="33" GPU_ONLY="" REPEATS=1 ./run-e6.sh
 set -euo pipefail
 cd "$(dirname "$0")"
+ROOT="$(pwd -W 2>/dev/null || pwd)"
+ENGINE="$ROOT/../engine"
 
 RUNGS="${RUNGS:-A B C D}"
 SIZES="${SIZES:-33 65}"
 GPU_ONLY="${GPU_ONLY:-129}"
 REPEATS="${REPEATS:-3}"
 REPEATS_LARGE="${REPEATS_LARGE:-2}"
-ORACLE=./oracle/target/release/oracle
+ORACLE="$ENGINE/oracle/target/release/oracle"
 
 for n in $SIZES; do
   for file in "drape4-final/drape-n$n/reference.bin" "drape5/drape-n$n/reference.bin"; do
@@ -29,17 +31,17 @@ for n in $GPU_ONLY; do
   [ -f "drape5/drape-n$n/problem.bin" ] || { echo "missing drape5/drape-n$n/problem.bin: generate it with run-e5.sh first" >&2; exit 1; }
 done
 
-cargo build --release --manifest-path oracle/Cargo.toml
+cargo build --release --manifest-path "$ENGINE/oracle/Cargo.toml"
 "$ORACLE" e6-rescore --root . --out results/experiment6-part0-rescore.json > /dev/null
 for n in $SIZES $GPU_ONLY; do
   rounds=$([[ " $GPU_ONLY " == *" $n "* ]] && echo "$REPEATS_LARGE" || echo "$REPEATS")
   for round in $(seq 1 "$rounds"); do
     for rung in $RUNGS; do
-      (cd gpu && node src/node/run-e6.ts --case "../drape5/drape-n$n" --rung "$rung")
+      (cd "$ENGINE/gpu" && node src/node/run-e6.ts --case "$ROOT/drape5/drape-n$n" --rung "$rung")
       cp "drape5/drape-n$n/e6-rung-$rung/gpu-result.json" "drape5/drape-n$n/e6-rung-$rung/gpu-result-run$round.json"
     done
   done
-  for rung in $RUNGS; do (cd gpu && node src/node/merge-runs.ts --dir "../drape5/drape-n$n/e6-rung-$rung"); done
+  for rung in $RUNGS; do (cd "$ENGINE/gpu" && node src/node/merge-runs.ts --dir "$ROOT/drape5/drape-n$n/e6-rung-$rung"); done
 done
 for rung in $RUNGS; do
   for n in $SIZES $GPU_ONLY; do
