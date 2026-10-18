@@ -1,7 +1,7 @@
 # editor
 
 The browser Jersey Editor (two sewn panels on an analytic body first, then real fabric data) is **not developed in this repository**.
-Its code will live in a separate **private** repository that consumes the engine as a dependency (package or submodule). This folder
+Its code lives in the separate **private** repository `refracts-systems/drape-studio`, which consumes the engine as a dependency (package or submodule). This folder
 only documents the plan and must stay free of editor code: removing a file from a public repository does not remove it from the history.
 
 ## Licensing and product plan (decided 2026-10-18)

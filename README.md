@@ -9,7 +9,7 @@ Goal: a simulation-based Jersey Editor close to real life, from small garment sh
 engine/
   oracle/        Rust, f64 reference: material, contact, Newton, pseudo-transient drape, scoring commands
   gpu/           WGSL kernels + TypeScript runner (Node, vgpu, WebGPU)
-editor/          placeholder only: the editor lives in a separate private repository (see editor/README.md)
+editor/          placeholder only: the editor lives in the private repository refracts-systems/drape-studio (see editor/README.md)
 experiments/     one folder per experiment: inputs, references, scored results, run scripts
   run-e1.sh … run-e7.sh, oracle-e7.sh
   cases/ coupon/ drape/ drape4-final/ drape5/ drape7/ results/
