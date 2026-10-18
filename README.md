@@ -38,4 +38,5 @@ the `oracle` stage of the scripts. The oracle reference of drape4-final and drap
 
 ## License
 
-Apache-2.0 (add the LICENSE file before the first public release).
+The engine, experiments and docs are licensed under the Apache License 2.0 (see `LICENSE` and `NOTICE`).
+`editor/` will be licensed separately; the decision is open (see `editor/README.md`). External contributions wait for a CLA (see `CONTRIBUTING.md`).
