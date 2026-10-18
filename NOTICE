@@ -3,4 +3,4 @@ Copyright 2026 Refracts Systems
 
 This product includes software developed by Refracts Systems (https://github.com/refracts-systems).
 The Apache License 2.0 in the file LICENSE applies to engine/, experiments/ and docs/.
-editor/ is licensed separately (see editor/README.md).
+The editor is a separate product in a separate repository and is licensed separately (see editor/README.md).

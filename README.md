@@ -9,7 +9,7 @@ Goal: a simulation-based Jersey Editor close to real life, from small garment sh
 engine/
   oracle/        Rust, f64 reference: material, contact, Newton, pseudo-transient drape, scoring commands
   gpu/           WGSL kernels + TypeScript runner (Node, vgpu, WebGPU)
-editor/          web app (not started)
+editor/          placeholder only: the editor lives in a separate private repository (see editor/README.md)
 experiments/     one folder per experiment: inputs, references, scored results, run scripts
   run-e1.sh … run-e7.sh, oracle-e7.sh
   cases/ coupon/ drape/ drape4-final/ drape5/ drape7/ results/
@@ -39,4 +39,4 @@ the `oracle` stage of the scripts. The oracle reference of drape4-final and drap
 ## License
 
 The engine, experiments and docs are licensed under the Apache License 2.0 (see `LICENSE` and `NOTICE`).
-`editor/` will be licensed separately; the decision is open (see `editor/README.md`). External contributions wait for a CLA (see `CONTRIBUTING.md`).
+The editor is developed in a separate private repository and will be licensed separately; the decision is open (see `editor/README.md`). External contributions wait for a CLA (see `CONTRIBUTING.md`).
