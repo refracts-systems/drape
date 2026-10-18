@@ -1,0 +1,73 @@
+{
+  "schema": "e7-gpu/1",
+  "backend": "vgpu-node-dawn",
+  "adapter": "D3D12 driver version 32.0.16.1714 (gpu)",
+  "mode": "warm",
+  "settings": {
+    "floorStop": true,
+    "forcing": true,
+    "regularize": true,
+    "noiseAware": true,
+    "gpuReductions": true,
+    "fewReadbacks": true
+  },
+  "record_fields": [
+    "step",
+    "iteration",
+    "relativeResidual",
+    "pcgIterations",
+    "pcgStatus",
+    "linearResidual",
+    "stepLength",
+    "halvings",
+    "status"
+  ],
+  "robust_fields": [
+    "eta",
+    "mu",
+    "updateInf",
+    "stepInf",
+    "retries",
+    "resolution",
+    "alphaMax",
+    "limitingVertex",
+    "minDistance",
+    "deltaSum",
+    "deltaAbs",
+    "noiseOnly",
+    "slope",
+    "slopeExact",
+    "normSquared",
+    "normSquaredExact"
+  ],
+  "grid_columns": 129,
+  "stop": "cap",
+  "cap": 400,
+  "accepted_steps": 400,
+  "rejected_attempts": 8,
+  "curvature_retry_attempts": 5,
+  "curvature_dropped_steps": 5,
+  "newton_iterations_total": 3351,
+  "pcg_iterations_total": 3163994,
+  "final_h": 0.006666666666666667,
+  "final_residual": 0.002750934334471822,
+  "final_relative_residual": 0.9914764694188474,
+  "trajectory_ms": 1189468.9248,
+  "ms_per_step": 2973.6723119999997,
+  "phase_ms_per_step": {
+    "assembly": 180.23784624998459,
+    "pcg": 2552.357650500008,
+    "line_search": 5.386523000005432,
+    "ccd": 10.208423499995241,
+    "reduce": 3.978741250003541,
+    "io": 105.53098575007867,
+    "other": 115.97214174992462
+  },
+  "read_bytes_total": 961688548,
+  "host_os": "Windows 11 Home Single Language 10.0.26300",
+  "host_gpus": "AMD Radeon(TM) Graphics 31.0.21925.1001; NVIDIA GeForce RTX 3050 Laptop GPU 32.0.16.1714",
+  "ms_per_step_runs": [
+    2973.6723119999997
+  ],
+  "runs": 1
+}

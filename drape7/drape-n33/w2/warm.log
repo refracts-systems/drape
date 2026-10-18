@@ -1,0 +1,9 @@
+ptc step 1 h=1.250e-1 r/L=4.808e0 inner=10 rejected=3 mu=1000
+ptc step 2 h=6.250e-2 r/L=1.674e1 inner=10 rejected=0 mu=0
+ptc step 3 h=3.125e-2 r/L=1.963e1 inner=7 rejected=0 mu=10
+ptc step 4 h=6.250e-2 r/L=8.972e-1 inner=6 rejected=0 mu=10
+ptc step 5 h=1.250e-1 r/L=2.967e-2 inner=6 rejected=0 mu=0.1
+ptc step 6 h=2.500e-1 r/L=2.908e-3 inner=7 rejected=0 mu=10
+ptc step 7 h=5.000e-1 r/L=1.834e-4 inner=7 rejected=0 mu=100
+ptc step 8 h=1.000e0 r/L=7.630e-6 inner=7 rejected=0 mu=100
+ptc step 9 h=1.000e0 r/L=5.902e-7 inner=8 rejected=0 mu=100

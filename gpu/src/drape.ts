@@ -35,6 +35,8 @@ export interface DrapeProblem {
   readonly f32: Readonly<Record<DrapeF32Name, Float32Array<ArrayBuffer>>>;
   readonly u32: Readonly<Record<DrapeU32Name, Uint32Array<ArrayBuffer>>>;
   readonly contact: DrapeContact;
+  /** Unit masses (f32, one per unknown row) of Experiment 7 problems; null before. */
+  readonly unitMass: Float32Array<ArrayBuffer> | null;
 }
 
 const SIZES = ["grid_columns", "vertices", "triangles", "hinges", "rows", "unknowns", "blocks", "steps", "probes", "time_step_s", "gravity_m_per_s2"] as const;
@@ -57,7 +59,7 @@ export function parseDrapeManifest(text: string): DrapeManifest {
 export function parseDrapeProblem(manifest: DrapeManifest, bytes: ArrayBuffer): DrapeProblem {
   const f32 = Object.fromEntries(F32_ARRAYS.map((name) => [name, new Float32Array(slice(manifest, bytes, name, "f32"))]));
   const u32 = Object.fromEntries(U32_ARRAYS.map((name) => [name, new Uint32Array(slice(manifest, bytes, name, "u32"))]));
-  return { manifest, f32: f32 as Record<DrapeF32Name, Float32Array<ArrayBuffer>>, u32: u32 as Record<DrapeU32Name, Uint32Array<ArrayBuffer>>, contact: parseContact(manifest, bytes) };
+  return { manifest, f32: f32 as Record<DrapeF32Name, Float32Array<ArrayBuffer>>, u32: u32 as Record<DrapeU32Name, Uint32Array<ArrayBuffer>>, contact: parseContact(manifest, bytes), unitMass: has(manifest, "row_unit_mass") ? new Float32Array(slice(manifest, bytes, "row_unit_mass", "f32")) : null };
 }
 
 /** Experiment 5 colliders ([count, d̂, κ, 0, 8 floats per collider]) and the contact kernel-check state; no colliders before. */

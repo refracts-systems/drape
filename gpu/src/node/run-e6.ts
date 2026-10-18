@@ -13,11 +13,8 @@ import { createPhaseClock, timeBackend } from "../timed-backend.ts";
 import { loadKernels } from "./files.ts";
 import { assertTargetAdapter, hostInfo } from "./hardware.ts";
 import { createVgpuBackend } from "./vgpu-backend.ts";
+import { bytesOf, EXTRA_FIELDS, join32, newtonIterations, RECORD_FIELDS, table, TRIAL_FIELDS, writeRun } from "./outputs.ts";
 
-const RECORD_FIELDS = ["step", "iteration", "relativeResidual", "pcgIterations", "pcgStatus", "linearResidual", "stepLength", "halvings", "status"] as const;
-const EXTRA_FIELDS = ["eta", "mu", "updateInf", "stepInf", "retries", "resolution", "alphaMax", "limitingVertex", "minDistance",
-  "deltaSum", "deltaAbs", "noiseOnly", "slope", "slopeExact", "normSquared", "normSquaredExact"] as const;
-const TRIAL_FIELDS = ["step", "iteration", "halving", "alpha", "sum", "abs", "slope", "accepted"] as const;
 
 /** E5 rung D (floor stop, forcing, regularisation) plus the Experiment 6 switches. */
 const BASE: RobustSettings = { floorStop: true, forcing: true, regularize: true };
@@ -44,15 +41,7 @@ async function loadDrape(dir: string): Promise<{ readonly problem: DrapeProblem;
   return { problem, rules: parseRobustRules(text) };
 }
 
-const bytesOf = (values: Float32Array<ArrayBuffer> | Float64Array<ArrayBuffer>): Uint8Array => new Uint8Array(values.buffer, values.byteOffset, values.byteLength);
-const table = <T>(rows: readonly T[], fields: readonly (keyof T)[]): Float64Array<ArrayBuffer> =>
-  Float64Array.from(rows.flatMap((row) => fields.map((field) => Number(row[field]))));
 
-function join32(parts: readonly Float32Array<ArrayBuffer>[]): Float32Array<ArrayBuffer> {
-  const joined = new Float32Array(parts.reduce((length, x) => length + x.length, 0));
-  parts.reduce((offset, x) => (joined.set(x, offset), offset + x.length), 0);
-  return joined;
-}
 
 interface Outputs {
   readonly adapter: string;
@@ -62,12 +51,7 @@ interface Outputs {
   readonly trajectory: RobustTrajectory;
 }
 
-async function writeRun(dir: string, prefix: string, run: RobustRun): Promise<void> {
-  await writeFile(join(dir, `gpu-${prefix}iterations.bin`), bytesOf(table<IterationRecord>(run.records, RECORD_FIELDS)));
-  await writeFile(join(dir, `gpu-${prefix}robust.bin`), bytesOf(table<RobustRecord>(run.extras, EXTRA_FIELDS)));
-}
 
-const newtonIterations = (run: RobustRun): number => run.records.filter((entry) => Number.isFinite(entry.pcgIterations)).length;
 
 async function writeOutputs(dir: string, rung: Rung, problem: DrapeProblem, out: Outputs): Promise<void> {
   await mkdir(dir, { recursive: true });

@@ -43,7 +43,7 @@ pub struct Iterate {
     pub norm_squared_exact: f64,
 }
 
-fn read_f64_rows(path: &Path, width: usize) -> Result<Vec<Vec<f64>>, String> {
+pub(crate) fn read_f64_rows(path: &Path, width: usize) -> Result<Vec<Vec<f64>>, String> {
     let bytes = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let values: Vec<f64> = bytes.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().unwrap())).collect();
     Ok(values.chunks_exact(width).map(<[f64]>::to_vec).collect())

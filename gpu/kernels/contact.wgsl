@@ -1,6 +1,7 @@
 // Vertex vs analytic-collider IPC barrier (Experiment 5), shared by the inertia, inertia-energy-change and CCD kernels.
 // colliders: [count, d̂, κ, 0, then 8 floats per collider: kind, a, b, c, w, 0, 0, 0];
 // kind 1: plane d = n·x − w with n = (a, b, c); kind 2: sphere d = |x − c| − w with c = (a, b, c).
+// colliders[3] = 1 drops the b′∇²d term of the barrier Hessian (Experiment 7, after a step that hit the μ cap); 0 everywhere else.
 // count 0 (Experiments 3 and 4) skips every contact term.
 
 struct Proximity {

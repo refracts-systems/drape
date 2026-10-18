@@ -26,9 +26,11 @@ mod e6_compare;
 mod e6_rescore;
 mod e6_summarize;
 mod e7_prolong;
+mod e7_compare;
 mod e7_ptc;
 mod e7_run;
 mod e7_state;
+mod e7_summarize;
 mod generate;
 mod hinge;
 mod io;
@@ -72,7 +74,9 @@ const USAGE: &str = "usage:
   oracle e6-summarize --dir <drape5 dir> --out <summary.json>
   oracle e7-generate --n <columns> --edit <base|w1|w2|w3> --out <dir>
   oracle e7-solve --dir <case dir> --mode <cold|warm|prolong> [--start <state prefix>] [--probes true]
-  oracle e7-prolong --coarse <state prefix> --coarse-n <columns> --fine-dir <case dir> --out <state prefix>";
+  oracle e7-compare --dir <case dir> --mode <cold|warm|prolong>
+  oracle e7-prolong --coarse <state prefix> --coarse-n <columns> --fine-dir <case dir> --out <state prefix>
+  oracle e7-summarize --dir <drape7 dir> --out <summary.json>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -110,6 +114,8 @@ fn dispatch(args: &[String]) -> Result<(), String> {
         "e7-generate" => e7_run::generate(number(&flags, "n", "33")?, required(&flags, "edit")?, &PathBuf::from(required(&flags, "out")?)),
         "e7-solve" => e7_run::solve(&PathBuf::from(required(&flags, "dir")?), required(&flags, "mode")?, flags.get("start").map(PathBuf::from).as_deref(), number(&flags, "probes", "false")?),
         "e7-prolong" => e7_prolong::run(&PathBuf::from(required(&flags, "coarse")?), number(&flags, "coarse-n", "33")?, &PathBuf::from(required(&flags, "fine-dir")?), &PathBuf::from(required(&flags, "out")?)),
+        "e7-compare" => e7_compare::run(&PathBuf::from(required(&flags, "dir")?), required(&flags, "mode")?),
+        "e7-summarize" => e7_summarize::run(&PathBuf::from(required(&flags, "dir")?), &PathBuf::from(required(&flags, "out")?)),
         "e4-diagnose" => e4_diagnose::run(&PathBuf::from(required(&flags, "dir")?), number(&flags, "step", "89")?, &PathBuf::from(required(&flags, "out")?)),
         other => Err(format!("unknown command '{other}'")),
     }

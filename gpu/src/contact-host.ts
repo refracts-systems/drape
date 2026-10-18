@@ -88,3 +88,10 @@ export async function evaluateContactKernel<A, K>(gpu: DrapeGpu<A, K>, problem: 
   joined.set(new Float32Array(hessian, 4 * offsets.hess, 9 * rows), 3 * rows);
   return joined;
 }
+
+/** Experiment 7: header[3] of the collider buffer switches the b′∇²d term of the barrier Hessian off (drop) or on. */
+export function setBarrierCurvature<A, K>(gpu: DrapeGpu<A, K>, problem: DrapeProblem, drop: boolean): void {
+  const header = Float32Array.from(problem.contact.colliders);
+  header[3] = drop ? 1 : 0;
+  gpu.backend.write(gpu.colliders, header);
+}

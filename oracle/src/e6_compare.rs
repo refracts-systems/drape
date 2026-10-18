@@ -53,7 +53,7 @@ fn rejected_excess(trials: &[Trial]) -> f64 {
 }
 
 /// Acceptance replay: (every decision agrees, trials, rejected trials, smallest excess over the noise bound).
-fn acceptance(gpu_dir: &Path, noise_aware: bool) -> Result<(bool, usize, usize, f64), String> {
+pub(crate) fn acceptance(gpu_dir: &Path, noise_aware: bool) -> Result<(bool, usize, usize, f64), String> {
     let all = trials(gpu_dir)?;
     let agrees = all.iter().all(|t| replayed_decision(t, noise_aware) == t.accepted);
     let rejected = all.iter().filter(|t| !t.accepted).count();

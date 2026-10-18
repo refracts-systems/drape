@@ -1,1 +1,1 @@
-{"probes":2,"steps":[1e0,5.6e1],"arrays":[{"name":"probe_steps","dtype":"u32","length":2,"offset":0},{"name":"probe_h","dtype":"f32","length":2,"offset":8},{"name":"probe_positions","dtype":"f32","length":6534,"offset":16}]}
+{"probes":5,"steps":[1e0,2e0,3.5e1,4.2e1,5.2e1],"arrays":[{"name":"probe_steps","dtype":"u32","length":5,"offset":0},{"name":"probe_h","dtype":"f32","length":5,"offset":24},{"name":"probe_positions","dtype":"f32","length":16335,"offset":48}]}

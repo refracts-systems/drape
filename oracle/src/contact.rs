@@ -133,9 +133,14 @@ impl Contact {
 
     /// Σ b″ n nᵀ + b′ (I − n nᵀ)/|x − c| (the second term only on the sphere).
     pub fn hessian(&self, x: Vec3) -> Mat3 {
+        self.hessian_with(x, true)
+    }
+
+    /// The same Hessian; with `curvature` false the b′∇²d term is dropped (the evidence-triggered change of Experiments 5 and 7).
+    pub fn hessian_with(&self, x: Vec3, curvature_term: bool) -> Mat3 {
         self.colliders.iter().fold([[0.0; 3]; 3], |sum, c| {
             let d = c.distance(x);
-            let (first, second, curvature) = (self.barrier.first(d), self.barrier.second(d), c.curvature(x));
+            let (first, second, curvature) = (self.barrier.first(d), self.barrier.second(d), if curvature_term { c.curvature(x) } else { 0.0 });
             let nn = outer(c.normal(x), c.normal(x));
             std::array::from_fn(|i| std::array::from_fn(|j| {
                 let identity = if i == j { 1.0 } else { 0.0 };

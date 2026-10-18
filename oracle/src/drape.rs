@@ -62,10 +62,12 @@ pub struct SceneParams {
     pub material: f64,
     pub radius: f64,
     pub rest: f64,
+    /// Cold start geometry: false = released 0.02·L above the sphere top (E5); true = placed with the sheet centre at 2·d̂ from it.
+    pub placed: bool,
 }
 
 impl SceneParams {
-    pub const BASE: SceneParams = SceneParams { material: 1.0, radius: 1.0, rest: 1.0 };
+    pub const BASE: SceneParams = SceneParams { material: 1.0, radius: 1.0, rest: 1.0, placed: false };
 }
 
 fn scene_contact(scene: Scene, mass: &[f64], params: SceneParams) -> (Contact, f64) {
@@ -77,7 +79,8 @@ fn scene_contact(scene: Scene, mass: &[f64], params: SceneParams) -> (Contact, f
     let ball = Collider::Sphere { centre: [0.5 * SHEET_SIZE, 0.5 * SHEET_SIZE, radius], radius };
     let heaviest = mass.iter().copied().fold(0.0, f64::max);
     let barrier = Barrier { dhat: ACTIVATION_DISTANCE, kappa: Barrier::resting_kappa(ACTIVATION_DISTANCE, heaviest, GRAVITY) };
-    (Contact { colliders: vec![floor, ball], barrier }, 2.0 * radius + 0.02 * SHEET_SIZE)
+    let clearance = if params.placed { 2.0 * ACTIVATION_DISTANCE } else { 0.02 * SHEET_SIZE };
+    (Contact { colliders: vec![floor, ball], barrier }, 2.0 * radius + clearance)
 }
 
 /// A 0.5 m knit sheet, flat in xy at height `lift`, falling under gravity (−z): pinned at its two top corners (E3/E4),
@@ -98,6 +101,8 @@ pub struct Drape {
     pub lift: f64,
     /// Step size h of M/h²; the dynamic experiments keep TIME_STEP, the pseudo-transient solver sets it per step.
     pub time_step: Cell<f64>,
+    /// Whether the exact barrier Hessian keeps its b′∇²d term; Experiment 7 clears it for a step that hit the μ cap.
+    pub barrier_curvature: Cell<bool>,
 }
 
 /// The knit baseline with every stiffness (membrane and bending) multiplied by `factor`; density is unchanged.
@@ -146,14 +151,14 @@ impl Drape {
         let hinges = hinge_elements(&mesh, &material);
         let mass: Vec<f64> = mesh.vertex_areas().iter().map(|a| material.density * a).collect();
         let (contact, lift) = scene_contact(scene, &mass, params);
-        Drape { mesh, material, membranes, hinges, fixed, row_of, free, pattern, mass, tangent_kind, scene, contact, lift, time_step: Cell::new(TIME_STEP) }
+        Drape { mesh, material, membranes, hinges, fixed, row_of, free, pattern, mass, tangent_kind, scene, contact, lift, time_step: Cell::new(TIME_STEP), barrier_curvature: Cell::new(true) }
     }
 
     /// The drape a problem.json describes (its "scene", pinned when absent).
     pub fn from_problem(problem: &str, tangent_kind: TangentKind) -> Drape {
         let columns = crate::jsonscan::number(problem, "", "grid_columns") as usize;
         let factor = |key: &str| { let v = crate::jsonscan::number(problem, "scene_params", key); if v.is_finite() { v } else { 1.0 } };
-        let params = SceneParams { material: factor("material_factor"), radius: factor("radius_factor"), rest: factor("rest_factor") };
+        let params = SceneParams { material: factor("material_factor"), radius: factor("radius_factor"), rest: factor("rest_factor"), placed: crate::jsonscan::flag(problem, "scene_params", "placed") };
         Drape::for_scene_with(columns, tangent_kind, Scene::parse(&crate::jsonscan::string(problem, "", "scene")), params)
     }
 
@@ -311,7 +316,7 @@ impl NewtonSystem for DrapeStep<'_> {
         drape.membranes.iter().for_each(|e| drape.add_blocks(&mut matrix, &e.vertices, &drape.membrane_hessian(e, x)));
         drape.hinges.iter().for_each(|h| drape.add_blocks(&mut matrix, &h.vertices, &drape.hinge_hessian(h, x)));
         if drape.has_contact() {
-            drape.free.iter().enumerate().for_each(|(row, &i)| matrix.add(row, row, &drape.contact.hessian(x[i])));
+            drape.free.iter().enumerate().for_each(|(row, &i)| matrix.add(row, row, &drape.contact.hessian_with(x[i], drape.barrier_curvature.get())));
         }
         matrix
     }

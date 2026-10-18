@@ -89,7 +89,7 @@ impl Reference {
 }
 
 /// Membrane and hinge gradients and Hessians from WGSL vs f64, exact kernels then projected ones.
-fn kernel_errors(drape: &Drape, dir: &Path) -> Result<[f64; 6], String> {
+pub(crate) fn kernel_errors(drape: &Drape, dir: &Path) -> Result<[f64; 6], String> {
     let gpu = read_f32_file(&dir.join("gpu-kernel.bin"))?;
     let state: Vec<Vec3> = round_f32(&kernel_state(drape).chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect::<Vec<Vec3>>());
     let membrane_grad: Vec<f64> = drape.membranes.iter().flat_map(|e| e.gradient(&state, &drape.material).into_iter().flatten()).collect();

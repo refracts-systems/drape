@@ -25,7 +25,7 @@ fn add_contact(row: u32, x: vec3f, k: u32) {
     elem_grad[GRAD_OFFSET + 3u * row + r] = elem_grad[GRAD_OFFSET + 3u * row + r] + first * n[r];
     for (var c = 0u; c < 3u; c = c + 1u) {
       let identity = select(0.0, 1.0, r == c);
-      let entry = second * n[r] * n[c] + first * near.curvature * (identity - n[r] * n[c]);
+      let entry = second * n[r] * n[c] + first * near.curvature * (1.0 - colliders[3]) * (identity - n[r] * n[c]);
       elem_hess[HESS_OFFSET + 9u * row + 3u * r + c] = elem_hess[HESS_OFFSET + 9u * row + 3u * r + c] + entry;
     }
   }

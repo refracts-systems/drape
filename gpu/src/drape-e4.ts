@@ -30,7 +30,7 @@ export interface RobustTrajectory extends RobustRun {
   readonly phases: Readonly<Record<Phase | "io", number>>;
 }
 
-function context<A, K>(gpu: DrapeGpu<A, K>, problem: DrapeProblem, rules: RobustRules, settings: RobustSettings, clock: PhaseClock, keep: boolean): RobustContext<A, K> {
+export function context<A, K>(gpu: DrapeGpu<A, K>, problem: DrapeProblem, rules: RobustRules, settings: RobustSettings, clock: PhaseClock, keep: boolean): RobustContext<A, K> {
   const reducers = settings.gpuReductions === true ? gpu.reducers : null;
   if (settings.gpuReductions === true && reducers === null) throw new Error("gpuReductions need prepareDrapeGpu(..., withReducers)");
   const ops = reducers === null ? hostOps(gpu, clock) : gpuOps(gpu, reducers, clock, keep);
@@ -52,7 +52,7 @@ async function timeStep<A, K>(ctx: RobustContext<A, K>, gpu: DrapeGpu<A, K>, pro
 }
 
 /** x̂ without colliders; with colliders x_n + α_max·(x̂ − x_n), α_max from the CCD kernel at x_n (already on the GPU). */
-async function newtonStart<A, K>(ctx: RobustContext<A, K>, gpu: DrapeGpu<A, K>, origin: Float32Array, xHat: Float32Array<ArrayBuffer>): Promise<Float32Array<ArrayBuffer>> {
+export async function newtonStart<A, K>(ctx: RobustContext<A, K>, gpu: DrapeGpu<A, K>, origin: Float32Array, xHat: Float32Array<ArrayBuffer>): Promise<Float32Array<ArrayBuffer>> {
   const contact = ctx.contact;
   if (contact === null) return Float32Array.from(xHat);
   const towards = Float32Array.from(xHat, (value, i) => value - origin[i]);
@@ -62,13 +62,13 @@ async function newtonStart<A, K>(ctx: RobustContext<A, K>, gpu: DrapeGpu<A, K>, 
 }
 
 /** Mean per-step wall clock: GPU submits per phase, host I/O, and the remainder ("other"). */
-function phaseMeans(clock: PhaseClock, totalMs: number, steps: number): Readonly<Record<Phase | "io", number>> {
+export function phaseMeans(clock: PhaseClock, totalMs: number, steps: number): Readonly<Record<Phase | "io", number>> {
   const { assembly, pcg, line_search, ccd, reduce } = clock.runMs;
   const other = totalMs - assembly - pcg - line_search - ccd - reduce - clock.ioMs;
   return { assembly: assembly / steps, pcg: pcg / steps, line_search: line_search / steps, ccd: ccd / steps, reduce: reduce / steps, io: clock.ioMs / steps, other: other / steps };
 }
 
-function resetClock(clock: PhaseClock): void {
+export function resetClock(clock: PhaseClock): void {
   (["assembly", "pcg", "line_search", "ccd", "reduce", "other"] as const).forEach((phase) => { clock.runMs[phase] = 0; });
   clock.ioMs = 0;
   clock.readBytes = 0;

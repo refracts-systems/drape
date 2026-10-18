@@ -17,23 +17,23 @@ const STAGNATION_FACTOR: f64 = 0.95;
 /// The three edits of Part 2 (stiffness, body, size) and the base scene.
 pub fn edit_params(edit: &str) -> Result<SceneParams, String> {
     match edit {
-        "base" => Ok(SceneParams::BASE),
-        "w1" => Ok(SceneParams { material: 1.25, ..SceneParams::BASE }),
-        "w2" => Ok(SceneParams { radius: 0.96, ..SceneParams::BASE }),
-        "w3" => Ok(SceneParams { rest: 1.03, ..SceneParams::BASE }),
+        "base" => Ok(SceneParams { placed: true, ..SceneParams::BASE }),
+        "w1" => Ok(SceneParams { material: 1.25, placed: true, ..SceneParams::BASE }),
+        "w2" => Ok(SceneParams { radius: 0.96, placed: true, ..SceneParams::BASE }),
+        "w3" => Ok(SceneParams { rest: 1.03, placed: true, ..SceneParams::BASE }),
         other => Err(format!("unknown edit '{other}' (base|w1|w2|w3)")),
     }
 }
 
 fn ptc_json(drape: &Drape) -> Json {
-    Json::new().number("h0", PTC.h0).number("h_max", PTC.h_max).number("h_min_factor", PTC.h_min_factor).number("growth_cap", PTC.growth_cap)
+    Json::new().number("h0", PTC.h0).number("h_max", PTC.h_max).number("h_min_factor", PTC.h_min_factor).number("growth", PTC.growth).number("shrink", PTC.shrink).integer("max_rejections", PTC.max_rejections).number("floor_guard", PTC.floor_guard)
         .number("inner_tolerance", PTC.inner_tolerance).integer("inner_max_iterations", PTC.inner_max).integer("max_steps", PTC.max_steps)
         .number("equilibrium_f64", PTC.equilibrium).number("equilibrium_f32", GPU_EQUILIBRIUM).integer("stagnation_window", STAGNATION_WINDOW)
         .number("stagnation_factor", STAGNATION_FACTOR).number("gravity_load", gravity_load(drape))
 }
 
 fn params_json(params: SceneParams) -> Json {
-    Json::new().number("material_factor", params.material).number("radius_factor", params.radius).number("rest_factor", params.rest)
+    Json::new().number("material_factor", params.material).number("radius_factor", params.radius).number("rest_factor", params.rest).flag("placed", params.placed)
 }
 
 /// Writes problem.json / problem.bin of the E5 scene with the edit applied, plus the PTC rules and the unit masses the GPU needs
@@ -59,9 +59,9 @@ fn run_json(drape: &Drape, run: &PtcRun, mode: &str) -> Json {
     let floor = vector_norm(&static_gradient(drape, &rounded)) / load;
     let newton: usize = run.steps.iter().map(|s| s.inner_iterations).sum();
     Json::new().text("schema", "e7-reference/1").text("mode", mode).flag("converged", run.converged()).text("reason", run.reason)
-        .integer("ptc_steps", run.steps.len()).integer("newton_iterations", newton).number("final_relative_residual", run.final_residual / load)
+        .integer("ptc_steps", run.steps.len()).integer("rejected_attempts", run.steps.iter().map(|s| s.rejected_attempts).sum::<usize>()).integer("newton_iterations", newton).number("final_relative_residual", run.final_residual / load)
         .number("representation_floor", floor).number("final_h", run.final_h).number("gravity_load", load)
-        .number("static_energy", static_energy(drape, run.last())).integer("mu_cap_steps", run.steps.iter().filter(|s| s.mu_cap).count())
+        .number("static_energy", static_energy(drape, run.last())).integer("mu_cap_steps", run.steps.iter().filter(|s| s.mu_cap).count()).integer("curvature_dropped_steps", run.steps.iter().filter(|s| s.curvature_dropped).count())
         .number("max_mu", run.steps.iter().map(|s| s.max_mu).fold(0.0, f64::max))
 }
 
@@ -71,6 +71,8 @@ fn write_reference(dir: &Path, mode: &str, drape: &Drape, run: &PtcRun) -> Resul
     arrays.push_f64("h", &run.steps.iter().map(|s| s.h).collect::<Vec<f64>>());
     arrays.push_f64("residual", &run.steps.iter().map(|s| s.residual).chain([run.final_residual]).collect::<Vec<f64>>());
     arrays.push_f64("inner_iterations", &run.steps.iter().map(|s| s.inner_iterations as f64).collect::<Vec<f64>>());
+    arrays.push_f64("rejected_attempts", &run.steps.iter().map(|s| s.rejected_attempts as f64).collect::<Vec<f64>>());
+    arrays.push_f64("max_mu", &run.steps.iter().map(|s| s.max_mu).collect::<Vec<f64>>());
     arrays.write(&dir.join(format!("reference-{mode}.bin")))?;
     let json = run_json(drape, run, mode).raw("arrays", arrays.manifest());
     write_text(&dir.join(format!("reference-{mode}.json")), &json.render())

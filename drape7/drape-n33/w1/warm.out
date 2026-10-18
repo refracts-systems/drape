@@ -1,0 +1,1 @@
+{"schema":"e7-reference/1","mode":"warm","converged":true,"reason":"tolerance","ptc_steps":4,"rejected_attempts":0,"newton_iterations":26,"final_relative_residual":1.3873558517853691e-10,"representation_floor":5.6182830249796735e-2,"final_h":1e0,"gravity_load":1.0338904762188926e-2,"static_energy":4.619986557557616e-2,"mu_cap_steps":0,"curvature_dropped_steps":0,"max_mu":1e3}

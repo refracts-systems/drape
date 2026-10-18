@@ -24,7 +24,7 @@ const CONTACT_KERNEL_COND_FACTOR: f64 = 8.0;
 /// α_max recomputed in f64 from the recorded probe iterates and directions must match the GPU to 1e-5 relative.
 const ALPHA_RELATIVE_LIMIT: f64 = 1e-5;
 
-fn to_states(values: &[f32], vertices: usize) -> Vec<Vec<Vec3>> {
+pub(crate) fn to_states(values: &[f32], vertices: usize) -> Vec<Vec<Vec3>> {
     values.chunks_exact(3 * vertices).map(|x| x.chunks_exact(3).map(|p| [p[0] as f64, p[1] as f64, p[2] as f64]).collect()).collect()
 }
 
@@ -49,7 +49,7 @@ fn group_errors(got: &[f32], expected: &[f64], tolerance: f64) -> (usize, usize,
 }
 
 /// WGSL contact kernel vs f64 at the f32-rounded contact state: [entries needing the cond branch, failures, worst ratio].
-fn contact_kernel(drape: &Drape, gpu_dir: &Path) -> Result<[f64; 3], String> {
+pub(crate) fn contact_kernel(drape: &Drape, gpu_dir: &Path) -> Result<[f64; 3], String> {
     let got = read_f32_file(&gpu_dir.join("gpu-contact-kernel.bin"))?;
     let rows = drape.rows();
     let state: Vec<Vec3> = contact_state(drape).iter().map(|p| p.map(|v| v as f32 as f64)).collect();
@@ -80,7 +80,7 @@ const ALPHA_COND_FACTOR: f64 = 8.0;
 
 /// For every probe update: the GPU's α_max against the f64 rule at the recorded iterate x_k and direction p_k, with the
 /// tolerance max(1e-5, 8·ε32·cond_α), cond_α = |q|/d0 of the limiting sphere (1 for the plane).
-fn alpha_replay(drape: &Drape, gpu_dir: &Path, iterates: &[Iterate]) -> Result<AlphaReplay, String> {
+pub(crate) fn alpha_replay(drape: &Drape, gpu_dir: &Path, iterates: &[Iterate]) -> Result<AlphaReplay, String> {
     let pairs = to_states(&read_f32_file(&gpu_dir.join("gpu-probe-directions.bin"))?, drape.mesh.rest.len());
     let updates: Vec<&Iterate> = iterates.iter().filter(|it| it.pcg_iterations.is_finite()).collect();
     if pairs.len() != 2 * updates.len() {
@@ -101,7 +101,7 @@ fn alpha_replay(drape: &Drape, gpu_dir: &Path, iterates: &[Iterate]) -> Result<A
 }
 
 /// The f32 spacing the GPU recorded for each probe update equals f32_spacing(max |x_i|) of the iterate it was recorded at.
-fn resolution_replay(drape: &Drape, gpu_dir: &Path, iterates: &[Iterate]) -> Result<bool, String> {
+pub(crate) fn resolution_replay(drape: &Drape, gpu_dir: &Path, iterates: &[Iterate]) -> Result<bool, String> {
     let states = to_states(&read_f32_file(&gpu_dir.join("gpu-probe-iterates.bin"))?, drape.mesh.rest.len());
     Ok(iterates.iter().zip(&states).filter(|(it, _)| it.pcg_iterations.is_finite()).all(|(it, x)| {
         let largest = drape.free.iter().flat_map(|&i| x[i]).fold(0.0f64, |m, v| m.max(v.abs()));
