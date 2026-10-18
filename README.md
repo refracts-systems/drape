@@ -3,6 +3,8 @@
 Physically-based cloth simulation for a browser jersey editor. The GPU solver (WebGPU/WGSL, f32) is validated at every step
 against a dependency-free Rust f64 oracle, and no tolerance is ever loosened to obtain a pass.
 
+For the full hand-off context (state, rules, gotchas, next steps) read `AGENTS.md`.
+
 Goal: a simulation-based Jersey Editor close to real life, from small garment shops up to club-level designers, embeddable in web shops.
 
 ```
