@@ -166,12 +166,13 @@ jersey-engine/
 | 6.6 | [e6_compare.rs, e6_summarize.rs](step_6/step_6_6_e6_compare_e6_summarize_rs.md) | replay penerimaan, trigger, rung final |
 | 6.7 | [run-e6.sh dan hasil](step_6/step_6_7_run_e6_sh_dan_hasil.md) | semua angka, gate, regresi |
 
-### Step 7: Drape kuasi-statik (Experiment 7, berhenti di Part 0.6)
+### Step 7: Drape kuasi-statik (Experiment 7)
 
 | No | File | Isi |
 |---|---|---|
-| 7.0 | [gambaran besar](step_7/step_7_0_gambaran_besar.md) | PTC, aturan STOP, diagnosis |
+| 7.0 | [gambaran besar](step_7/step_7_0_gambaran_besar.md) | PTC, STOP pertama, dua perbaikan, hasil akhir |
 | 7.1 | [kode oracle](step_7/step_7_1_oracle_ptc.md) | `e7_ptc.rs`, `e7_run.rs`, `e7_prolong.rs`, `e7_state.rs`, parameter scene |
+| 7.2 | [GPU dan penilai](step_7/step_7_2_gpu_dan_penilai.md) | langkah PTC di GPU, pemicu μ-cap, penilai, cara menjalankan |
 
 ## Glosarium cepat
 

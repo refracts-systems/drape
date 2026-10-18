@@ -1,6 +1,6 @@
 # Step 7.1: Kode Oracle E7 (`e7_ptc.rs`, `e7_run.rs`, `e7_prolong.rs`, `e7_state.rs`, `drape.rs`)
 
-> Kode oracle untuk kuasi-statik. Semuanya baru atau aditif: E1–E6 tidak berubah (45 tes lulus, termasuk 3 tes PTC dan 1 tes prolongasi).
+> Kode oracle untuk kuasi-statik. Semuanya baru atau aditif: E1–E6 tidak berubah (46 tes lulus, termasuk tes PTC dan prolongasi).
 
 ---
 
