@@ -38,8 +38,7 @@ export function stagnated(rules: PtcRules, history: readonly number[]): boolean 
   return smallest(last) >= rules.stagnation_factor * smallest(before) && last[window - 1] / rules.gravity_load <= STAGNATION_LOAD_LIMIT;
 }
 
-/** Why a solve ended. */
-/** "time_budget" is not one of the prompt rules: a wall-clock limit the runner may set for the largest mesh, reported as such. */
+/** Why a solve ended. "time_budget" is not one of the prompt rules: a wall-clock limit the runner may set for the largest mesh, reported as such. */
 export type StopRule = "tolerance" | "stagnation" | "cap" | "stalled" | "time_budget";
 
 /** The rule that ends the solve at residual history r_0 … r_k after `accepted` steps, or null to continue. */

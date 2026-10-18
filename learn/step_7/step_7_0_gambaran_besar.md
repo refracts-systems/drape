@@ -69,7 +69,7 @@ Tidak ada toleransi yang dilonggarkan untuk mendapatkan lolos.
 ## 6. Pelajaran untuk editor
 
 PTC dengan PCG block-Jacobi cukup untuk mesh sampai n65 (puluhan detik), tetapi tidak untuk n129 (PCG sampai 200.000 iterasi per langkah). Untuk editor
-interaktif, langkah berikutnya adalah pengkondisi yang lebih baik (multigrid), bukan penyetelan lagi. Warm start membantu di n17–n65 (2–4× lebih cepat),
+interaktif, langkah berikutnya adalah pengkondisi yang lebih baik (multigrid), bukan penyetelan lagi. Warm start membantu di n17–n65 (sekitar 1,4–5× lebih cepat dalam waktu dinding),
 tetapi belum cukup untuk target interaktif.
 
-Detail oracle ada di `step_7_1_oracle_ptc.md`, detail GPU dan penilai di `step_7_2_gpu_dan_penilai.md`.
+Detail oracle ada di `step_7_1_oracle_ptc.md`; detail GPU, penilai, dan hasil ada di `step_7_2` sampai `step_7_7`.

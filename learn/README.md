@@ -172,7 +172,12 @@ jersey-engine/
 |---|---|---|
 | 7.0 | [gambaran besar](step_7/step_7_0_gambaran_besar.md) | PTC, STOP pertama, dua perbaikan, hasil akhir |
 | 7.1 | [kode oracle](step_7/step_7_1_oracle_ptc.md) | `e7_ptc.rs`, `e7_run.rs`, `e7_prolong.rs`, `e7_state.rs`, parameter scene |
-| 7.2 | [GPU dan penilai](step_7/step_7_2_gpu_dan_penilai.md) | langkah PTC di GPU, pemicu μ-cap, penilai, cara menjalankan |
+| 7.2 | [ptc.ts, drape-e7.ts](step_7/step_7_2_ptc_ts_drape_e7_ts.md) | aturan stop, pengontrol, penolakan percobaan, loop solve |
+| 7.3 | [pemicu μ-cap](step_7/step_7_3_pemicu_mu_cap_wgsl.md) | saklar kurvatur barrier di WGSL, oracle, dan GPU |
+| 7.4 | [run-e7.ts, outputs.ts, state-files.ts](step_7/step_7_4_run_e7_outputs_state_files_ts.md) | runner, mode cold/warm/prolong, berkas keluaran |
+| 7.5 | [e7_compare.rs](step_7/step_7_5_e7_compare_rs.md) | cek, replay aturan, verdict per run |
+| 7.6 | [e7_summarize.rs](step_7/step_7_6_e7_summarize_rs.md) | tabel Part 1–3, gerbang, temuan |
+| 7.7 | [run-e7.sh dan hasil](step_7/step_7_7_run_e7_sh_dan_hasil.md) | skrip, jebakan, semua angka |
 
 ## Glosarium cepat
 
